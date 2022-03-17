@@ -323,7 +323,7 @@ class Renault extends utils.Adapter {
         ];
 
         const headers = {
-            apikey: "Ae9FDWugRxZQAGm3Sxgk7uJn6Q4CGEA2",
+            apikey: "VAX7XYKGfa92yMvXculCkEFyfZbuM7Ss",
             "content-type": "application/json",
             accept: "*/*",
             "user-agent": "MYRenault/39 CFNetwork/1312 Darwin/21.0.0",
@@ -506,7 +506,7 @@ class Renault extends utils.Adapter {
                     method: "post",
                     url: url,
                     headers: {
-                        apikey: "Ae9FDWugRxZQAGm3Sxgk7uJn6Q4CGEA2",
+                        apikey: "VAX7XYKGfa92yMvXculCkEFyfZbuM7Ss",
                         "content-type": "application/vnd.api+json",
                         accept: "*/*",
                         "user-agent": "MYRenault/39 CFNetwork/1312 Darwin/21.0.0",

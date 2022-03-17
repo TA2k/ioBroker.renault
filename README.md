@@ -28,7 +28,15 @@ renault.0.vin.remote auf true setzen steuert den jeweiligen Befehl
 
 ## Changelog
 
-### 0.0.7
+### 0.0.10
+
+* (hudeldudel) update apikey also in request headers
+
+### 0.0.9
+
+* (TA2K) update apikey
+
+### 0.0.8
 
 * (TA2k) initial release
 
