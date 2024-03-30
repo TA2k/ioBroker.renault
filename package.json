@@ -1,0 +1,62 @@
+{
+  "name": "iobroker.renault",
+  "version": "0.0.22",
+  "description": "Adapter for Renault and Renault",
+  "author": {
+    "name": "TA2k",
+    "email": "tombox2020@gmail.com"
+  },
+  "contributors": [
+    {
+      "name": "fungus75"
+    }
+  ],
+  "homepage": "https://github.com/TA2k/ioBroker.renault",
+  "license": "MIT",
+  "keywords": [
+    "renault",
+    "Renault",
+    "dacia",
+    "Dacia"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TA2k/ioBroker.renault"
+  },
+  "dependencies": {
+    "@iobroker/adapter-core": "^3.0.6",
+    "axios": "^1.6.8",
+    "json-bigint": "^1.0.0",
+    "json2iob": "^2.6.8",
+    "qs": "^6.12.0"
+  },
+  "devDependencies": {
+    "@iobroker/testing": "^4.1.1",
+    "@types/node": "^20.12.2",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.3"
+  },
+  "main": "main.js",
+  "files": [
+    "admin{,/!(src)/**}/!(tsconfig|tsconfig.*).json",
+    "admin{,/!(src)/**}/*.{html,css,png,svg,jpg,js}",
+    "lib/",
+    "www/",
+    "io-package.json",
+    "LICENSE",
+    "main.js"
+  ],
+  "scripts": {
+    "test:js": "mocha --config test/mocharc.custom.json \"{!(node_modules|test)/**/*.test.js,*.test.js,test/**/test!(PackageFiles|Startup).js}\"",
+    "test:package": "mocha test/package --exit",
+    "test:unit": "mocha test/unit --exit",
+    "test:integration": "mocha test/integration --exit",
+    "test": "npm run test:js && npm run test:package",
+    "check": "tsc --noEmit -p tsconfig.check.json",
+    "lint": "eslint"
+  },
+  "bugs": {
+    "url": "https://github.com/TA2k/ioBroker.renault/issues"
+  },
+  "readmeFilename": "README.md"
+}

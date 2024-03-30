@@ -1,0 +1,130 @@
+{
+  "common": {
+    "name": "renault",
+    "version": "0.0.22",
+    "news": {
+      "0.0.22": {
+        "en": "add error log"
+      },
+      "0.0.21": {
+        "en": "fix login"
+      },
+      "0.0.17": {
+        "en": "update apikey"
+      },
+      "0.0.15": {
+        "en": "fix charge start and reduce error logs"
+      },
+      "0.0.14": {
+        "en": "add charging stop"
+      },
+      "0.0.13": {
+        "en": "add remote object for force refresh"
+      },
+      "0.0.10": {
+        "en": "update apikey"
+      },
+      "0.0.8": {
+        "en": "initial release",
+        "de": "Erstveröffentlichung",
+        "ru": "Начальная версия",
+        "pt": "lançamento inicial",
+        "nl": "Eerste uitgave",
+        "fr": "Première version",
+        "it": "Versione iniziale",
+        "es": "Versión inicial",
+        "pl": "Pierwsze wydanie",
+        "zh-cn": "首次出版"
+      }
+    },
+    "title": "Renault",
+    "titleLang": {
+      "en": "Renault",
+      "de": "Renault",
+      "ru": "Рено",
+      "pt": "Renault",
+      "nl": "Renault",
+      "fr": "Renault",
+      "it": "Renault",
+      "es": "Renault",
+      "pl": "Renault ",
+      "zh-cn": "雷诺和佐伊"
+    },
+    "desc": {
+      "en": "Adapter for Renault cars for example Zoe",
+      "de": "Adapter für Renault Autos zum Beispiel Zoe",
+      "ru": "Адаптер для автомобилей Renault на примере Zoe",
+      "pt": "Adaptador para carros Renault, por exemplo Zoe",
+      "nl": "Adapter voor Renault auto's bijvoorbeeld Zoe",
+      "fr": "Adaptateur pour voitures Renault par exemple Zoe",
+      "it": "Adattatore per auto Renault ad esempio Zoe",
+      "es": "Adaptador para automóviles Renault, por ejemplo Zoe",
+      "pl": "Adapter do samochodów Renault np. Zoe",
+      "zh-cn": "雷诺汽车的适配器，例如 Zoe"
+    },
+    "authors": ["TA2k <tombox2020@gmail.com>"],
+    "keywords": ["renault", "Renault"],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "main": "main.js",
+    "icon": "renault.png",
+    "enabled": true,
+    "extIcon": "https://raw.githubusercontent.com/TA2k/ioBroker.renault/master/admin/renault.png",
+    "readme": "https://github.com/TA2k/ioBroker.renault/blob/master/README.md",
+    "loglevel": "info",
+    "mode": "daemon",
+    "type": "vehicle",
+    "compact": true,
+    "connectionType": "cloud",
+    "dataSource": "poll",
+    "materialize": true,
+    "plugins": {
+      "sentry": {
+        "dsn": "https://c9bd6c851b1246da95e6e982aa9b88f3@sentry.iobroker.net/152"
+      }
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=3.2.0"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=4.0.9"
+      }
+    ]
+  },
+  "encryptedNative": ["password"],
+  "protectedNative": ["password"],
+  "native": {
+    "username": "",
+    "country": "de",
+    "password": "",
+    "apiKeyUpdate": "",
+    "interval": 10
+  },
+  "objects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": {
+        "name": "Information"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "role": "indicator.connected",
+        "name": "Device or service connected",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    }
+  ]
+}
