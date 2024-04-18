@@ -28,6 +28,7 @@ class Renault extends utils.Adapter {
     this.ignoreState = {};
     this.firstUpdate = true;
     this.requestClient = axios.create();
+    this.userAgent = 'MYRenault/1 CFNetwork/1494.0.7 Darwin/23.4.0';
   }
 
   /**
@@ -46,7 +47,7 @@ class Renault extends utils.Adapter {
     this.country = this.config.country || 'de';
     this.session = {};
     //DE API Key
-    this.apiKey = '3_7PLksOyBRkHv126x5WhHb-5pqC1qFR8pQjxSeLB6nhAnPERTUlwnYoznHSxwX668';
+    this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
     this.apiKeyUpdate = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
     try {
       await this.requestClient({
@@ -78,9 +79,12 @@ class Renault extends utils.Adapter {
     if (this.session.id_token && this.session_data && this.account) {
       await this.getDeviceList();
       await this.updateDevices();
-      this.updateInterval = setInterval(async () => {
-        await this.updateDevices();
-      }, this.config.interval * 60 * 1000);
+      this.updateInterval = setInterval(
+        async () => {
+          await this.updateDevices();
+        },
+        this.config.interval * 60 * 1000,
+      );
       this.refreshTokenInterval = setInterval(() => {
         this.refreshToken();
       }, 3500 * 1000);
@@ -91,7 +95,7 @@ class Renault extends utils.Adapter {
       method: 'post',
       url: 'https://accounts.eu1.gigya.com/accounts.login',
       headers: {
-        'User-Agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+        'User-Agent': this.userAgent,
         Accept: '*/*',
         'Accept-Language': 'de-de',
         'Cache-Control': 'no-cache',
@@ -127,7 +131,7 @@ class Renault extends utils.Adapter {
       method: 'post',
       url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
       headers: {
-        'User-Agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+        'User-Agent': this.userAgent,
         Accept: '*/*',
         'Accept-Language': 'de-de',
         'Cache-Control': 'no-cache',
@@ -159,7 +163,7 @@ class Renault extends utils.Adapter {
       headers: {
         'Content-Type': 'application/json',
         Accept: '*/*',
-        'User-Agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+        'User-Agent': this.userAgent,
         apiKey: this.apiKeyUpdate,
         'Accept-Language': 'de-de',
         'x-gigya-id_token': this.session.id_token,
@@ -204,7 +208,7 @@ class Renault extends utils.Adapter {
         apikey: this.apiKeyUpdate,
         'content-type': 'application/json',
         accept: '*/*',
-        'user-agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+        'user-agent': this.userAgent,
         'accept-language': 'de-de',
         'x-gigya-id_token': this.session.id_token,
       },
@@ -409,7 +413,7 @@ class Renault extends utils.Adapter {
       apikey: this.apiKeyUpdate,
       'content-type': 'application/json',
       accept: '*/*',
-      'user-agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+      'user-agent': this.userAgent,
       'accept-language': 'de-de',
       'x-gigya-id_token': this.session.id_token,
     };
@@ -435,8 +439,8 @@ class Renault extends utils.Adapter {
               data = res.data.data.attributes;
             }
 
-            const forceIndex = null;
-            const preferedArrayName = null;
+            const forceIndex = undefined;
+            const preferedArrayName = undefined;
 
             this.json2iob.parse(vin + '.' + element.path, data, {
               forceIndex: forceIndex,
@@ -498,7 +502,7 @@ class Renault extends utils.Adapter {
       method: 'post',
       url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
       headers: {
-        'User-Agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+        'User-Agent': this.userAgent,
         Accept: '*/*',
         'Accept-Language': 'de-de',
         'Cache-Control': 'no-cache',
@@ -523,9 +527,12 @@ class Renault extends utils.Adapter {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
         this.log.error('Start relogin in 1min');
-        this.reLoginTimeout = setTimeout(() => {
-          this.login();
-        }, 1000 * 60 * 1);
+        this.reLoginTimeout = setTimeout(
+          () => {
+            this.login();
+          },
+          1000 * 60 * 1,
+        );
       });
   }
   sleep(ms) {
@@ -617,7 +624,7 @@ class Renault extends utils.Adapter {
             apikey: this.apiKeyUpdate,
             'content-type': 'application/vnd.api+json',
             accept: '*/*',
-            'user-agent': 'MYRenault/39 CFNetwork/1312 Darwin/21.0.0',
+            'user-agent': this.userAgent,
             'accept-language': 'de-de',
             'x-gigya-id_token': this.session.id_token,
           },
