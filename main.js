@@ -124,7 +124,7 @@ class Renault extends utils.Adapter {
         }
       });
     if (!this.session_data) {
-      this.log.error('No session found for this account');
+      this.log.error('No session found for this account. Please login in the app. Maybe a new password is needed.');
       return;
     }
     await this.requestClient({
