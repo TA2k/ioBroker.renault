@@ -358,28 +358,7 @@ class Renault extends utils.Adapter {
           this.country,
         desc: 'Charging settings of the car',
       },
-      {
-        path: 'charge-history',
-        url:
-          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
-          this.account.accountId +
-          '/kamereon/kca/car-adapter/v1/cars/$vin/charge-history?type=day&start=1970-01-01&end=' +
-          curDate +
-          '&country=' +
-          this.country,
-        desc: 'Charging history of the car',
-      },
-      {
-        path: 'charges',
-        url:
-          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
-          this.account.accountId +
-          '/kamereon/kca/car-adapter/v1/cars/$vin/charges?start=1970-01-01&end=' +
-          curDate +
-          '&country=' +
-          this.country,
-        desc: 'Charges of the car',
-      },
+
       {
         path: 'lock-status',
         url:
@@ -408,6 +387,31 @@ class Renault extends utils.Adapter {
         desc: 'Location of the car',
       },
     ];
+
+    if (!this.config.disableChargeFetching) {
+      statusArray.push({
+        path: 'charge-history',
+        url:
+          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+          this.account.accountId +
+          '/kamereon/kca/car-adapter/v1/cars/$vin/charge-history?type=day&start=1970-01-01&end=' +
+          curDate +
+          '&country=' +
+          this.country,
+        desc: 'Charging history of the car',
+      });
+      statusArray.push({
+        path: 'charges',
+        url:
+          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+          this.account.accountId +
+          '/kamereon/kca/car-adapter/v1/cars/$vin/charges?start=1970-01-01&end=' +
+          curDate +
+          '&country=' +
+          this.country,
+        desc: 'Charges of the car',
+      });
+    }
 
     const headers = {
       apikey: this.apiKeyUpdate,
@@ -563,6 +567,7 @@ class Renault extends utils.Adapter {
       clearInterval(this.refreshTokenInterval);
       callback();
     } catch (e) {
+      this.log.error('Error onUnload: ' + e);
       callback();
     }
   }

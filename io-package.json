@@ -101,7 +101,8 @@
     "country": "de",
     "password": "",
     "apiKeyUpdate": "",
-    "interval": 10
+    "interval": 10,
+    "disableChargeFetching": false
   },
   "objects": [],
   "instanceObjects": [
