@@ -39,7 +39,7 @@
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@iobroker/testing": "^5.2.2",
-    "@tsconfig/node18": "^18.2.6",
+    "@tsconfig/node20": "^20.1.9",
     "@types/node": "^25.9.1",
     "eslint": "^10.4.0",
     "eslint-config-prettier": "^10.1.8",
