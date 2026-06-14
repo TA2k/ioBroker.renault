@@ -190,6 +190,19 @@
         "def": false
       },
       "native": {}
+    },
+    {
+      "_id": "info.migrationV1",
+      "type": "state",
+      "common": {
+        "role": "indicator",
+        "name": "Migration V1 (charge history forceIndex) executed",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
     }
   ]
 }

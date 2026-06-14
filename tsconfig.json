@@ -10,8 +10,11 @@
         "checkJs": true,
 
         "module": "commonjs",
-        "moduleResolution": "node",
+        "moduleResolution": "node10",
+        "ignoreDeprecations": "6.0",
         "esModuleInterop": true,
+        "skipLibCheck": true,
+        "types": ["node", "mocha"],
         // this is necessary for the automatic typing of the adapter config
         "resolveJsonModule": true,
 

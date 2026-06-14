@@ -88,6 +88,7 @@ class Renault extends utils.Adapter {
 
     if (this.session.id_token && this.session_data && this.account) {
       await this.getDeviceList();
+      await this.migrateChargeHistoryV1();
       await this.updateDevices();
       this.updateInterval = setInterval(
         async () => {
@@ -259,7 +260,12 @@ class Renault extends utils.Adapter {
 
           const remoteArray = [
             { command: 'actions/hvac-start', name: 'True = Start, False = Stop' },
-            { command: 'hvac-temperature', name: 'HVAC Temperature', type: 'number', role: 'value' },
+            {
+              command: 'hvac-temperature',
+              name: 'HVAC Temperature',
+              type: /** @type {ioBroker.CommonType} */ ('number'),
+              role: 'value',
+            },
             { command: 'actions/charging-start', name: 'True = Start, False = Stop' },
             { command: 'charge/pause-resume', name: 'True = Start, False = Stop' },
             { command: 'charge/start', name: 'True = Start, False = Stop' },
@@ -270,7 +276,7 @@ class Renault extends utils.Adapter {
               type: 'state',
               common: {
                 name: remote.name || '',
-                type: remote.type || 'boolean',
+                type: /** @type {ioBroker.CommonType} */ (remote.type || 'boolean'),
                 role: remote.role || 'button',
                 write: true,
                 read: true,
@@ -289,12 +295,40 @@ class Renault extends utils.Adapter {
       });
   }
 
+  /**
+   * One-shot migration: with v0.0.24 the charge-history and charges endpoints switched from
+   * date-named channels (e.g. `20220802`, `2022-04-22T11:46:38Z`) to numeric forceIndex slots.
+   * Without cleanup the old objects would linger forever next to the new ones. The marker state
+   * `info.migrationV1` ensures this only runs once per instance.
+   */
+  async migrateChargeHistoryV1() {
+    try {
+      const marker = await this.getStateAsync('info.migrationV1');
+      if (marker && marker.val === true) {
+        return;
+      }
+      this.log.info('Running charge history migration V1: cleaning up legacy date-named channels');
+      for (const vin of this.deviceArray) {
+        for (const path of ['charge-history', 'charges']) {
+          await this.delObjectAsync(vin + '.' + path, { recursive: true }).catch(() => {});
+        }
+      }
+      await this.setState('info.migrationV1', { val: true, ack: true });
+      this.log.info('Charge history migration V1 done');
+    } catch (e) {
+      this.log.warn('Charge history migration V1 failed: ' + e);
+    }
+  }
+
   async updateDevices() {
     if (!this.account.accountId) {
       this.log.error('No accountId found');
       return;
     }
     const curDate = new Date().toISOString().split('T')[0];
+    // Charge history: limit start date to ~1 year back (My Renault app paginates yearly).
+    // Keeping the range bounded prevents the API from returning years of data on every poll.
+    const historyStart = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     const statusArray = [
       {
@@ -405,22 +439,28 @@ class Renault extends utils.Adapter {
         url:
           'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
           this.account.accountId +
-          '/kamereon/kca/car-adapter/v1/cars/$vin/charge-history?type=day&start=1970-01-01&end=' +
+          '/kamereon/kca/car-adapter/v1/cars/$vin/charge-history?type=day&start=' +
+          historyStart +
+          '&end=' +
           curDate +
           '&country=' +
           this.country,
         desc: 'Charging history of the car',
+        isHistory: true,
       });
       statusArray.push({
         path: 'charges',
         url:
           'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
           this.account.accountId +
-          '/kamereon/kca/car-adapter/v1/cars/$vin/charges?start=1970-01-01&end=' +
+          '/kamereon/kca/car-adapter/v1/cars/$vin/charges?start=' +
+          historyStart +
+          '&end=' +
           curDate +
           '&country=' +
           this.country,
         desc: 'Charges of the car',
+        isHistory: true,
       });
     }
 
@@ -444,7 +484,7 @@ class Renault extends utils.Adapter {
           url: url,
           headers: { ...headers, 'X-Amzn-Trace-Id': this.buildTraceId() },
         })
-          .then((res) => {
+          .then(async (res) => {
             this.log.debug(JSON.stringify(res.data));
             if (!res.data) {
               return;
@@ -454,8 +494,21 @@ class Renault extends utils.Adapter {
               data = res.data.data.attributes;
             }
 
-            const forceIndex = undefined;
+            let forceIndex = undefined;
             const preferedArrayName = undefined;
+
+            // Charge history endpoints return arrays keyed by date — without forceIndex
+            // json2iob creates a new channel per date and never cleans them up. Cap to the
+            // most recent 100 entries (matches the My Renault app pagination) and use
+            // numeric indices so old entries are overwritten on each poll. The one-shot
+            // migrateChargeHistoryV1() removes the legacy date-named channels on first start.
+            if (element.isHistory) {
+              forceIndex = true;
+              const arrayKey = element.path === 'charge-history' ? 'chargeSummaries' : 'charges';
+              if (data && Array.isArray(data[arrayKey]) && data[arrayKey].length > 100) {
+                data = { ...data, [arrayKey]: data[arrayKey].slice(-100) };
+              }
+            }
 
             this.json2iob.parse(vin + '.' + element.path, data, {
               forceIndex: forceIndex,
