@@ -166,7 +166,8 @@
     "password": "",
     "apiKeyUpdate": "",
     "interval": 10,
-    "disableChargeFetching": false
+    "disableChargeFetching": false,
+    "chargeHistoryLimit": 100
   },
   "objects": [],
   "instanceObjects": [

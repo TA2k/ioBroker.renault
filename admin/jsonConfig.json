@@ -67,6 +67,21 @@
       "lg": 4,
       "xl": 4
     },
+    "chargeHistoryLimit": {
+      "type": "number",
+      "label": "Charge history entries to keep",
+      "help": "Number of most recent entries kept per charge-history endpoint (0 = unlimited)",
+      "min": 0,
+      "max": 1000,
+      "default": 100,
+      "hidden": "data.disableChargeFetching === true",
+      "newLine": true,
+      "xs": 12,
+      "sm": 12,
+      "md": 4,
+      "lg": 2,
+      "xl": 2
+    },
     "_apiHeader": {
       "type": "header",
       "text": "API Key",

@@ -499,14 +499,16 @@ class Renault extends utils.Adapter {
 
             // Charge history endpoints return arrays keyed by date — without forceIndex
             // json2iob creates a new channel per date and never cleans them up. Cap to the
-            // most recent 100 entries (matches the My Renault app pagination) and use
+            // configured limit (default 100, matches the My Renault app pagination) and use
             // numeric indices so old entries are overwritten on each poll. The one-shot
             // migrateChargeHistoryV1() removes the legacy date-named channels on first start.
             if (element.isHistory) {
               forceIndex = true;
               const arrayKey = element.path === 'charge-history' ? 'chargeSummaries' : 'charges';
-              if (data && Array.isArray(data[arrayKey]) && data[arrayKey].length > 100) {
-                data = { ...data, [arrayKey]: data[arrayKey].slice(-100) };
+              const limit = Number(this.config.chargeHistoryLimit);
+              const cap = Number.isFinite(limit) && limit > 0 ? limit : 0;
+              if (cap > 0 && data && Array.isArray(data[arrayKey]) && data[arrayKey].length > cap) {
+                data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
               }
             }
 
