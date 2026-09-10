@@ -163,6 +163,7 @@
   "native": {
     "username": "",
     "country": "de",
+    "brand": "renault",
     "password": "",
     "apiKeyUpdate": "",
     "interval": 10,

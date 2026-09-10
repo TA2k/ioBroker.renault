@@ -38,7 +38,9 @@ class Renault extends utils.Adapter {
       const v = c === 'x' ? r : (r & 0x3) | 0x8;
       return v.toString(16);
     });
-    return 'build=renault-android-6.11.2;trId=' + uuid;
+    const brand = this.brand || 'renault';
+    const version = brand === 'alpine' ? '6.10.1' : '6.11.2';
+    return 'build=' + brand + '-android-' + version + ';trId=' + uuid;
   }
 
   /**
@@ -55,28 +57,39 @@ class Renault extends utils.Adapter {
     this.reLoginTimeout = null;
     this.refreshTokenTimeout = null;
     this.country = this.config.country || 'de';
+    this.brand = this.config.brand || 'renault';
     this.session = {};
-    //DE API Key
-    this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
-    this.apiKeyUpdate = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
-    try {
-      await this.requestClient({
-        method: 'get',
-        url: 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py',
-      })
-
-        .then((res) => {
-          this.log.debug(JSON.stringify(res.data));
-
-          if (res.data.split('KAMEREON_APIKEY = "')[2] && res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0]) {
-            this.apiKeyUpdate = res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0];
-          }
+    if (this.brand === 'alpine') {
+      // My Alpine app (gigya_prod / wired_prod from res/xml/remote_config_defaults.xml)
+      this.apiKey = '3_4LKbCcMMcvjDm3X89LU4z4mNKYKdl_W0oD9w-Jvih21WqgJKtFZAnb9YdUgWT9_a';
+      this.apiKeyUpdate = 'oF09WnKqvBDcrQzcW1rJNpjIuy7KdGaB';
+      this.product = 'MYALPINE';
+      this.accountTypes = ['MYALPINE'];
+    } else {
+      //DE API Key
+      this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
+      this.apiKeyUpdate = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
+      this.product = 'MYRENAULT';
+      this.accountTypes = ['MYRENAULT', 'MYDACIA'];
+      try {
+        await this.requestClient({
+          method: 'get',
+          url: 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py',
         })
-        .catch((error) => {
-          this.log.debug(error);
-        });
-    } catch (error) {
-      this.log.debug(error);
+
+          .then((res) => {
+            this.log.debug(JSON.stringify(res.data));
+
+            if (res.data.split('KAMEREON_APIKEY = "')[2] && res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0]) {
+              this.apiKeyUpdate = res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0];
+            }
+          })
+          .catch((error) => {
+            this.log.debug(error);
+          });
+      } catch (error) {
+        this.log.debug(error);
+      }
     }
     if (this.config.apiKeyUpdate) {
       this.apiKeyUpdate = this.config.apiKeyUpdate;
@@ -170,7 +183,11 @@ class Renault extends utils.Adapter {
       });
     await this.requestClient({
       method: 'post',
-      url: 'https://apis.renault.com/myr/api/v1/connection?&country=DE&product=MYRENAULT&locale=de-DE&displayAccounts=MYRENAULT',
+      url:
+        'https://apis.renault.com/myr/api/v1/connection?&country=DE&product=' +
+        this.product +
+        '&locale=de-DE&displayAccounts=' +
+        this.product,
       headers: {
         'Content-Type': 'application/json',
         Accept: '*/*',
@@ -183,8 +200,9 @@ class Renault extends utils.Adapter {
       .then((res) => {
         this.log.debug(JSON.stringify(res.data));
 
+        const accountTypes = this.accountTypes;
         const filteredAccounts = res.data.currentUser.accounts.filter(function (el) {
-          return (el.accountType === 'MYRENAULT' || el.accountType === 'MYDACIA') && el.accountStatus === 'ACTIVE';
+          return accountTypes.includes(el.accountType) && el.accountStatus === 'ACTIVE';
         });
         if (filteredAccounts.length === 0) {
           this.log.error('No Account found');

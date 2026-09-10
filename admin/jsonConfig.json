@@ -28,6 +28,22 @@
       "lg": 4,
       "xl": 4
     },
+    "brand": {
+      "type": "select",
+      "label": "Brand",
+      "help": "Renault/Dacia and Alpine use different accounts and API keys",
+      "default": "renault",
+      "options": [
+        { "label": "Renault / Dacia", "value": "renault" },
+        { "label": "Alpine", "value": "alpine" }
+      ],
+      "newLine": true,
+      "xs": 12,
+      "sm": 12,
+      "md": 4,
+      "lg": 2,
+      "xl": 2
+    },
     "country": {
       "type": "text",
       "label": "Country",
