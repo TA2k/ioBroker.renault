@@ -49,6 +49,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 -->
 
 ### **WORK IN PROGRESS**
+- (iobroker-bot) Adapter requires node.js >= 22 now.
 
 - (TA2k) add Alpine support (brand selection with dedicated Gigya/Kamereon API keys)
 
