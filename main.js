@@ -59,37 +59,34 @@ class Renault extends utils.Adapter {
     this.country = this.config.country || 'de';
     this.brand = this.config.brand || 'renault';
     this.session = {};
+    //DE API Key (shared by Renault, Dacia and Alpine - same Gigya/Kamereon tenant)
+    this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
+    this.apiKeyUpdate = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
     if (this.brand === 'alpine') {
-      // My Alpine app (gigya_prod / wired_prod from res/xml/remote_config_defaults.xml)
-      this.apiKey = '3_4LKbCcMMcvjDm3X89LU4z4mNKYKdl_W0oD9w-Jvih21WqgJKtFZAnb9YdUgWT9_a';
-      this.apiKeyUpdate = 'oF09WnKqvBDcrQzcW1rJNpjIuy7KdGaB';
       this.product = 'MYALPINE';
       this.accountTypes = ['MYALPINE'];
     } else {
-      //DE API Key
-      this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
-      this.apiKeyUpdate = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
       this.product = 'MYRENAULT';
       this.accountTypes = ['MYRENAULT', 'MYDACIA'];
-      try {
-        await this.requestClient({
-          method: 'get',
-          url: 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py',
+    }
+    try {
+      await this.requestClient({
+        method: 'get',
+        url: 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py',
+      })
+
+        .then((res) => {
+          this.log.debug(JSON.stringify(res.data));
+
+          if (res.data.split('KAMEREON_APIKEY = "')[2] && res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0]) {
+            this.apiKeyUpdate = res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0];
+          }
         })
-
-          .then((res) => {
-            this.log.debug(JSON.stringify(res.data));
-
-            if (res.data.split('KAMEREON_APIKEY = "')[2] && res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0]) {
-              this.apiKeyUpdate = res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0];
-            }
-          })
-          .catch((error) => {
-            this.log.debug(error);
-          });
-      } catch (error) {
-        this.log.debug(error);
-      }
+        .catch((error) => {
+          this.log.debug(error);
+        });
+    } catch (error) {
+      this.log.debug(error);
     }
     if (this.config.apiKeyUpdate) {
       this.apiKeyUpdate = this.config.apiKeyUpdate;

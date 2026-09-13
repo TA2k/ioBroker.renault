@@ -50,7 +50,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
-- (TA2k) add Alpine support (brand selection with dedicated Gigya/Kamereon API keys)
+- (TA2k) add Alpine support: brand selection (Alpine accounts use the same Renault Gigya/Kamereon tenant, only product/account type MYALPINE differs)
 
 ### 0.0.23
 
