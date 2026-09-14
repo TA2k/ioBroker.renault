@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "renault",
-    "version": "0.0.23",
+    "version": "0.0.24",
     "news": {
+      "0.0.24": {
+        "en": "add Alpine support (select brand Alpine in the settings)",
+        "de": "Alpine-Unterstützung hinzugefügt (Marke Alpine in den Einstellungen wählen)",
+        "ru": "Добавлена поддержка Alpine (выберите марку Alpine в настройках)",
+        "pt": "Suporte para Alpine adicionado (selecione a marca Alpine nas definições)",
+        "nl": "Alpine-ondersteuning toegevoegd (selecteer merk Alpine in de instellingen)",
+        "fr": "Prise en charge d'Alpine ajoutée (sélectionnez la marque Alpine dans les paramètres)",
+        "it": "Aggiunto supporto Alpine (seleziona il marchio Alpine nelle impostazioni)",
+        "es": "Añadido soporte para Alpine (seleccione la marca Alpine en los ajustes)",
+        "pl": "Dodano obsługę Alpine (wybierz markę Alpine w ustawieniach)",
+        "uk": "Додано підтримку Alpine (виберіть марку Alpine в налаштуваннях)",
+        "zh-cn": "新增 Alpine 支持（在设置中选择品牌 Alpine）"
+      },
       "0.0.23": {
         "en": "align API headers with My Renault Android app (User-Agent okhttp/5.3.0, X-Amzn-Trace-Id)",
         "de": "API-Header an My-Renault-Android-App angeglichen (User-Agent okhttp/5.3.0, X-Amzn-Trace-Id)",
