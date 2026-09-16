@@ -27,7 +27,8 @@ class Renault extends utils.Adapter {
     this.json2iob = new Json2iob(this);
     this.ignoreState = {};
     this.firstUpdate = true;
-    this.requestClient = axios.create();
+    // Without a timeout a request the cloud never answers stalls every later poll.
+    this.requestClient = axios.create({ timeout: 30 * 1000 });
     this.userAgent = 'okhttp/5.3.0';
     /** @type {string} */
     this.brand = 'renault';

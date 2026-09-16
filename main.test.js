@@ -177,6 +177,34 @@ describe('startup', () => {
   });
 });
 
+describe('http client', () => {
+  it('aborts a request the cloud never answers', async () => {
+    const server = require('node:http').createServer(() => {});
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
+    const clock = sinon.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const { requestClient } = createRenault();
+      const address = /** @type {import('node:net').AddressInfo} */ (server.address());
+      const request = requestClient({ url: `http://127.0.0.1:${address.port}/` }).then(
+        () => 'answered',
+        (error) => error.code,
+      );
+      let outcome = 'pending';
+      request.then((result) => (outcome = result));
+      await new Promise((resolve) => setImmediate(resolve));
+      await clock.tickAsync(30 * 1000 - 1);
+      expect(outcome).to.equal('pending');
+      await clock.tickAsync(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(outcome).to.equal('ECONNABORTED');
+    } finally {
+      clock.restore();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+});
+
 describe('token refresh', () => {
   it('clears info.connection when the refresh fails', async () => {
     const adapter = setup();

@@ -52,6 +52,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) requests to the Renault cloud time out after 30 seconds, so one unanswered request no longer stalls polling
 - (typhosj) the adapter icon and readme links point to the `main` branch again
 - (typhosj) timers are managed by the adapter, so none survives a stop of the instance
 - (typhosj) lint uses the shared `@iobroker/eslint-config`; dependencies updated
