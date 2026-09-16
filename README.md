@@ -50,7 +50,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
   ### **WORK IN PROGRESS**
 -->
 
-### **WORK IN PROGRESS**
+### 0.0.25
 
 - (typhosj) retry the connection with growing delay (5 to 60 minutes) when login or vehicle list fail at startup; a login rejected by the account service is not retried
 - (typhosj) `info.connection` is true only after the account was found and turns false when the token refresh fails

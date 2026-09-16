@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "renault",
-    "version": "0.0.24",
+    "version": "0.0.25",
     "news": {
+      "0.0.25": {
+        "en": "more robust startup with retry, truthful connection state, no secrets in the log, require Node.js 22+",
+        "de": "robusterer Start mit Wiederholung, ehrlicher Verbindungsstatus, keine Geheimnisse im Log, benötigt Node.js 22+",
+        "ru": "более надёжный запуск с повтором, честный статус соединения, без секретов в логе, требуется Node.js 22+",
+        "pt": "arranque mais robusto com nova tentativa, estado de ligação fiável, sem segredos no registo, requer Node.js 22+",
+        "nl": "robuustere start met herhaling, eerlijke verbindingsstatus, geen geheimen in het logboek, vereist Node.js 22+",
+        "fr": "démarrage plus robuste avec nouvelle tentative, état de connexion fiable, aucun secret dans le journal, nécessite Node.js 22+",
+        "it": "avvio più robusto con ripetizione, stato di connessione affidabile, nessun segreto nel log, richiede Node.js 22+",
+        "es": "inicio más robusto con reintento, estado de conexión fiable, sin secretos en el registro, requiere Node.js 22+",
+        "pl": "solidniejszy start z ponawianiem, prawdziwy status połączenia, bez sekretów w logu, wymaga Node.js 22+",
+        "uk": "надійніший запуск із повтором, чесний статус з'єднання, без секретів у журналі, потрібен Node.js 22+",
+        "zh-cn": "启动更稳健并带重试、连接状态真实、日志中不含密钥、需要 Node.js 22+"
+      },
       "0.0.24": {
         "en": "add Alpine support (select brand Alpine in the settings)",
         "de": "Alpine-Unterstützung hinzugefügt (Marke Alpine in den Einstellungen wählen)",
