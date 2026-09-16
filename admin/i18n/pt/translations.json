@@ -10,5 +10,7 @@
   "API Key": "Chave API",
   "API Key (leave empty for auto-detect)": "Chave API (deixe em branco para detecção automática)",
   "If empty, the API key will be set automatically": "Se vazio, a chave API será definida automaticamente",
-  "Click here for current API Key": "Clique aqui para a chave API atual"
+  "Click here for current API Key": "Clique aqui para a chave API atual",
+  "Charge history entries to keep": "Entradas do histórico de carregamento a manter",
+  "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Número de entradas mais recentes mantidas por endpoint do histórico de carregamento (0 = ilimitado)"
 }

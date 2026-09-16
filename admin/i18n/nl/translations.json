@@ -10,5 +10,7 @@
   "API Key": "API-sleutel",
   "API Key (leave empty for auto-detect)": "API-sleutel (laat leeg voor auto-detectie)",
   "If empty, the API key will be set automatically": "Indien leeg, wordt de API-sleutel automatisch ingesteld",
-  "Click here for current API Key": "Klik hier voor de huidige API-sleutel"
+  "Click here for current API Key": "Klik hier voor de huidige API-sleutel",
+  "Charge history entries to keep": "Te bewaren items van de laadgeschiedenis",
+  "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Aantal meest recente items dat per laadgeschiedenis-endpoint wordt bewaard (0 = onbeperkt)"
 }

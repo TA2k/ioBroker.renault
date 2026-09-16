@@ -29,6 +29,14 @@ class Renault extends utils.Adapter {
     this.firstUpdate = true;
     this.requestClient = axios.create();
     this.userAgent = 'okhttp/5.3.0';
+    /** @type {string} */
+    this.brand = 'renault';
+    /** @type {string[]} */
+    this.accountTypes = [];
+    this.updateInterval = null;
+    this.refreshTokenInterval = null;
+    this.startAttempt = 0;
+    this.loginRejected = false;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -38,7 +46,7 @@ class Renault extends utils.Adapter {
       const v = c === 'x' ? r : (r & 0x3) | 0x8;
       return v.toString(16);
     });
-    const brand = this.brand || 'renault';
+    const brand = this.brand;
     const version = brand === 'alpine' ? '6.10.1' : '6.11.2';
     return 'build=' + brand + '-android-' + version + ';trId=' + uuid;
   }
@@ -53,7 +61,6 @@ class Renault extends utils.Adapter {
       this.log.info('Set interval to minimum 0.5');
       this.config.interval = 0.5;
     }
-    this.updateInterval = null;
     this.reLoginTimeout = null;
     this.refreshTokenTimeout = null;
     this.country = this.config.country || 'de';
@@ -76,17 +83,15 @@ class Renault extends utils.Adapter {
       })
 
         .then((res) => {
-          this.log.debug(JSON.stringify(res.data));
-
           if (res.data.split('KAMEREON_APIKEY = "')[2] && res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0]) {
             this.apiKeyUpdate = res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0];
           }
         })
         .catch((error) => {
-          this.log.debug(error);
+          this.log.debug('API key lookup failed: ' + error);
         });
     } catch (error) {
-      this.log.debug(error);
+      this.log.debug('API key lookup failed: ' + error);
     }
     if (this.config.apiKeyUpdate) {
       this.apiKeyUpdate = this.config.apiKeyUpdate;
@@ -94,10 +99,16 @@ class Renault extends utils.Adapter {
 
     this.subscribeStates('*');
 
-    await this.login();
+    await this.connectAndPoll();
+  }
 
-    if (this.session.id_token && this.session_data && this.account) {
-      await this.getDeviceList();
+  /**
+   * Log in, load the vehicles and start polling. A network or server failure is retried with
+   * growing delay (5 min doubling up to 60 min). A login the account service rejected is not
+   * retried, so wrong credentials cannot lock the account.
+   */
+  async connectAndPoll() {
+    if ((await this.login()) && (await this.getDeviceList())) {
       await this.migrateChargeHistoryV1();
       await this.updateDevices();
       this.updateInterval = setInterval(
@@ -109,9 +120,33 @@ class Renault extends utils.Adapter {
       this.refreshTokenInterval = setInterval(() => {
         this.refreshToken();
       }, 3500 * 1000);
+      return;
     }
+    if (this.loginRejected) {
+      this.log.error('Login rejected. Check email and password in the adapter settings, then restart the instance.');
+      return;
+    }
+    const delayMinutes = Math.min(5 * 2 ** this.startAttempt, 60);
+    this.startAttempt++;
+    this.log.warn('Connection to the Renault cloud failed. Next attempt in ' + delayMinutes + ' minutes');
+    this.setTimeout(
+      () => this.connectAndPoll().catch((error) => this.log.error('Connection attempt failed: ' + error)),
+      delayMinutes * 60 * 1000,
+    );
   }
+
+  /**
+   * Log in and look up the account. Sets info.connection accordingly.
+   *
+   * @returns {Promise<boolean>} true when session, id token and account are available
+   */
   async login() {
+    const ok = await this.loginSteps();
+    this.setState('info.connection', ok, true);
+    return ok;
+  }
+
+  async loginSteps() {
     this.session_data = await this.requestClient({
       method: 'post',
       url: 'https://accounts.eu1.gigya.com/accounts.login',
@@ -131,23 +166,24 @@ class Renault extends utils.Adapter {
       }),
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         if (res.data.errorMessage) {
+          this.loginRejected = true;
           this.log.error(JSON.stringify(res.data));
           return;
         }
         return res.data.sessionInfo;
       })
       .catch((error) => {
-        this.log.error(error);
+        this.log.error('Login failed: ' + error);
         if (error.response) {
           this.log.error(JSON.stringify(error.response.data));
         }
       });
     if (!this.session_data) {
       this.log.error('No session found for this account. Please login in the app. Maybe a new password is needed.');
-      return;
+      return false;
     }
+    this.session = {};
     await this.requestClient({
       method: 'post',
       url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
@@ -168,17 +204,18 @@ class Renault extends utils.Adapter {
       }),
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         this.session = res.data;
-        this.setState('info.connection', true, true);
       })
       .catch((error) => {
-        this.log.error(error);
+        this.log.error('Getting the id token failed: ' + error);
         if (error.response) {
           this.log.error(JSON.stringify(error.response.data));
         }
       });
-    await this.requestClient({
+    if (!this.session.id_token) {
+      return false;
+    }
+    return await this.requestClient({
       method: 'post',
       url:
         'https://apis.renault.com/myr/api/v1/connection?&country=DE&product=' +
@@ -195,34 +232,41 @@ class Renault extends utils.Adapter {
       },
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
-
         const accountTypes = this.accountTypes;
         const filteredAccounts = res.data.currentUser.accounts.filter(function (el) {
           return accountTypes.includes(el.accountType) && el.accountStatus === 'ACTIVE';
         });
         if (filteredAccounts.length === 0) {
           this.log.error('No Account found');
-          this.log.error('All accounts: ' + res.data.currentUser.accounts);
-          this.log.error('Filtered accounts: ' + filteredAccounts);
-          return;
+          this.log.error(
+            'Accounts of this login: ' +
+              JSON.stringify(res.data.currentUser.accounts.map((el) => el.accountType + ' ' + el.accountStatus)),
+          );
+          return false;
         }
 
         this.account = filteredAccounts[0];
+        return true;
       })
       .catch((error) => {
-        this.log.error('Error while getting account');
-        this.log.error(error);
+        this.log.error('Error while getting account: ' + error);
         if (error.response) {
           this.log.error(JSON.stringify(error.response.data));
           if (error.response.data && JSON.stringify(error.response.data).indexOf('apikey') !== -1) {
             this.log.error('Wrong API Key. Please update API Key in adapter settings');
           }
         }
+        return false;
       });
   }
+
+  /**
+   * Load the vehicles of the account and create their objects.
+   *
+   * @returns {Promise<boolean>} true when the vehicle list was loaded
+   */
   async getDeviceList() {
-    await this.requestClient({
+    return await this.requestClient({
       method: 'get',
       url:
         'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
@@ -243,10 +287,11 @@ class Renault extends utils.Adapter {
       .then(async (res) => {
         this.log.debug(JSON.stringify(res.data));
 
+        this.deviceArray = [];
         for (const device of res.data.vehicleLinks) {
           this.deviceArray.push(device.vin);
           let name = device.vehicleDetails?.modelSCR || device.brand;
-          if (device.vehicleDetails.model && device.vehicleDetails.model.label) {
+          if (device.vehicleDetails?.model?.label) {
             name += device.vehicleDetails.model.label;
           }
 
@@ -302,11 +347,12 @@ class Renault extends utils.Adapter {
           delete device.mileage;
           this.json2iob.parse(device.vin + '.general', device);
         }
+        return true;
       })
       .catch((error) => {
-        this.log.error('Error while getting vehicle list');
-        this.log.error(error);
+        this.log.error('Error while getting vehicle list: ' + error);
         error.response && this.log.error(JSON.stringify(error.response.data));
+        return false;
       });
   }
 
@@ -336,7 +382,7 @@ class Renault extends utils.Adapter {
   }
 
   async updateDevices() {
-    if (!this.account.accountId) {
+    if (!this.account?.accountId) {
       this.log.error('No accountId found');
       return;
     }
@@ -546,20 +592,13 @@ class Renault extends utils.Adapter {
                 return;
               }
               if (this.firstUpdate) {
-                if (
-                  error.response.status === 403 ||
-                  error.response.status === 404 ||
-                  error.response.status === 500 ||
-                  error.response.status === 501 ||
-                  error.response.status === 502 ||
-                  error.response.status === 400
-                ) {
+                if (error.response.status === 400 || error.response.status === 403 || error.response.status === 404) {
                   if (!this.ignoreState[vin]) {
                     this.ignoreState[vin] = [];
                   }
                   this.ignoreState[vin].push(element.path);
                   this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for updates.');
-                  this.log.debug(error);
+                  this.log.debug(String(error));
                   error.response && this.log.debug(JSON.stringify(error.response.data));
                   return;
                 }
@@ -570,7 +609,7 @@ class Renault extends utils.Adapter {
               return;
             }
             this.log.error(url);
-            this.log.error(error);
+            this.log.error(String(error));
             error.response && this.log.error(JSON.stringify(error.response.data));
           });
       }
@@ -603,13 +642,12 @@ class Renault extends utils.Adapter {
       }),
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         this.session = res.data;
         this.setState('info.connection', true, true);
       })
       .catch((error) => {
-        this.log.error('refresh token failed');
-        this.log.error(error);
+        this.setState('info.connection', false, true);
+        this.log.error('refresh token failed: ' + error);
         error.response && this.log.error(JSON.stringify(error.response.data));
         this.log.error('Start relogin in 1min');
         this.reLoginTimeout = setTimeout(
@@ -619,9 +657,6 @@ class Renault extends utils.Adapter {
           1000 * 60 * 1,
         );
       });
-  }
-  sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
   toCamelCase(string) {
     if (!string) {
@@ -645,7 +680,7 @@ class Renault extends utils.Adapter {
       this.reLoginTimeout && clearTimeout(this.reLoginTimeout);
       this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
-      clearInterval(this.refreshTokenInterval);
+      this.refreshTokenInterval && clearInterval(this.refreshTokenInterval);
       callback();
     } catch (e) {
       this.log.error('Error onUnload: ' + e);
@@ -666,13 +701,13 @@ class Renault extends utils.Adapter {
         if (path === 'hvac-temperature') {
           return;
         }
+        if (!this.account) {
+          this.log.error('No account found');
+          return;
+        }
         if (path === 'refresh') {
           this.log.info('Force refresh');
           this.updateDevices();
-          return;
-        }
-        if (!this.account) {
-          this.log.error('No account found');
           return;
         }
         const command = path.split('/')[1];
@@ -722,7 +757,7 @@ class Renault extends utils.Adapter {
             return res.data;
           })
           .catch((error) => {
-            this.log.error(error);
+            this.log.error('Command ' + path + ' failed: ' + error);
             if (error.response) {
               this.log.error(JSON.stringify(error.response.data));
             }

@@ -48,6 +48,15 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
   ### **WORK IN PROGRESS**
 -->
 
+### **WORK IN PROGRESS**
+
+- (typhosj) retry the connection with growing delay (5 to 60 minutes) when login or vehicle list fail at startup; a login rejected by the account service is not retried
+- (typhosj) `info.connection` is true only after the account was found and turns false when the token refresh fails
+- (typhosj) a temporary server error (5xx) on the first poll no longer disables that endpoint until restart
+- (typhosj) fix crash for vehicles without vehicle details and for the refresh button before login
+- (typhosj) no longer write password, session cookie, id token or account data into the log
+- (typhosj) add missing admin translations, remove unused dependencies
+
 ### 0.0.24
 
 - (TA2k) add Alpine support: brand selection (Alpine accounts use the same Renault Gigya/Kamereon tenant, only product/account type MYALPINE differs)
