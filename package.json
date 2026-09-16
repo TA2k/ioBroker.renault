@@ -1,7 +1,7 @@
 {
   "name": "iobroker.renault",
   "version": "0.0.24",
-  "description": "Adapter for Renault and Renault",
+  "description": "Adapter for Renault, Dacia and Alpine",
   "author": {
     "name": "TA2k",
     "email": "tombox2020@gmail.com"
@@ -27,7 +27,6 @@
   "dependencies": {
     "@iobroker/adapter-core": "^3.3.2",
     "axios": "^1.16.1",
-    "json-bigint": "^1.0.0",
     "json2iob": "^2.6.22",
     "qs": "^6.15.2"
   },
@@ -39,7 +38,6 @@
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@iobroker/testing": "^5.2.2",
-    "@tsconfig/node18": "^18.2.6",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.9.1",
     "eslint": "^10.4.0",
