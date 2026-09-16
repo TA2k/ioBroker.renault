@@ -54,7 +54,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 - (typhosj) the adapter icon and readme links point to the `main` branch again
 - (typhosj) timers are managed by the adapter, so none survives a stop of the instance
-- (typhosj) the type check works with TypeScript 7; dependencies updated
+- (typhosj) lint uses the shared `@iobroker/eslint-config`; dependencies updated
 
 ### 0.0.25
 
