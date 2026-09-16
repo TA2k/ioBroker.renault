@@ -245,8 +245,7 @@ class Renault extends utils.Adapter {
         if (filteredAccounts.length === 0) {
           this.log.error('No Account found');
           this.log.error(
-            'Accounts of this login: ' +
-              JSON.stringify(res.data.currentUser.accounts.map((el) => el.accountType + ' ' + el.accountStatus)),
+            'Accounts of this login: ' + JSON.stringify(res.data.currentUser.accounts.map((el) => el.accountType + ' ' + el.accountStatus)),
           );
           return false;
         }

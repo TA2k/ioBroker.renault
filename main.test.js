@@ -43,12 +43,14 @@ class FakeAdapter extends EventEmitter {
   clearInterval() {}
 }
 const corePath = require.resolve('@iobroker/adapter-core');
-require.cache[corePath] = /** @type {NodeModule} */ (/** @type {unknown} */ ({
-  id: corePath,
-  filename: corePath,
-  loaded: true,
-  exports: { Adapter: FakeAdapter },
-}));
+require.cache[corePath] = /** @type {NodeModule} */ (
+  /** @type {unknown} */ ({
+    id: corePath,
+    filename: corePath,
+    loaded: true,
+    exports: { Adapter: FakeAdapter },
+  })
+);
 const createRenault = require('./main.js');
 
 /**
@@ -231,9 +233,7 @@ describe('logging', () => {
     await working.refreshToken();
 
     for (const adapter of [failing, working]) {
-      const lines = Object.values(adapter.log).flatMap((spy) =>
-        spy.getCalls().map((call) => require('node:util').inspect(call.args[0])),
-      );
+      const lines = Object.values(adapter.log).flatMap((spy) => spy.getCalls().map((call) => require('node:util').inspect(call.args[0])));
       for (const secret of ['secret', 'COOKIE', 'ID_TOKEN']) {
         expect(lines.filter((line) => line.includes(secret))).to.deep.equal([]);
       }

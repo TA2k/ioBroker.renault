@@ -28,14 +28,14 @@ This adapter connects ioBroker to the My Renault / My Dacia / My Alpine cloud an
 
 Each vehicle is created as a device using its VIN. Remote commands are exposed as states under `renault.0.<VIN>.remote.*`:
 
-| State                       | Type    | Action |
-| --------------------------- | ------- | ------ |
-| `actions/hvac-start`        | boolean | `true` = start, `false` = stop pre-conditioning |
-| `hvac-temperature`          | number  | Target HVAC temperature |
-| `actions/charging-start`    | boolean | `true` = start, `false` = stop charging |
-| `charge/pause-resume`       | boolean | `true` = start, `false` = pause |
-| `charge/start`              | boolean | `true` = start, `false` = stop charging (legacy endpoint) |
-| `refresh`                   | boolean | `true` = force refresh of vehicle data |
+| State                    | Type    | Action                                                    |
+| ------------------------ | ------- | --------------------------------------------------------- |
+| `actions/hvac-start`     | boolean | `true` = start, `false` = stop pre-conditioning           |
+| `hvac-temperature`       | number  | Target HVAC temperature                                   |
+| `actions/charging-start` | boolean | `true` = start, `false` = stop charging                   |
+| `charge/pause-resume`    | boolean | `true` = start, `false` = pause                           |
+| `charge/start`           | boolean | `true` = start, `false` = stop charging (legacy endpoint) |
+| `refresh`                | boolean | `true` = force refresh of vehicle data                    |
 
 Set the corresponding state to `true` to trigger the command.
 

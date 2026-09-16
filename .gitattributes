@@ -1,0 +1,3 @@
+# Git stores every text file with LF; without this a Windows checkout hands prettier CRLF
+# and every single line of the repository fails the lint.
+* text=auto eol=lf

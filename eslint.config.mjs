@@ -18,8 +18,6 @@ export default [
       'jsdoc/require-returns': 'off',
       'jsdoc/require-returns-description': 'off',
       'jsdoc/tag-lines': 'off',
-      // The code base keeps its own .prettierrc.js style and is not formatted by the lint run.
-      'prettier/prettier': 'off',
       'prefer-template': 'off',
     },
   },
