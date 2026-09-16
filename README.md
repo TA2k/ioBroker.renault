@@ -50,6 +50,12 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
   ### **WORK IN PROGRESS**
 -->
 
+### **WORK IN PROGRESS**
+
+- (typhosj) the adapter icon and readme links point to the `main` branch again
+- (typhosj) timers are managed by the adapter, so none survives a stop of the instance
+- (typhosj) the type check works with TypeScript 7; dependencies updated
+
 ### 0.0.25
 
 - (typhosj) retry the connection with growing delay (5 to 60 minutes) when login or vehicle list fail at startup; a login rejected by the account service is not retried

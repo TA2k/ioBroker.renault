@@ -11,6 +11,7 @@ class FakeAdapter extends EventEmitter {
     this.config = {};
     this.states = {};
     this.timeouts = [];
+    this.intervals = [];
     this.log = { debug: sinon.spy(), info: sinon.spy(), warn: sinon.spy(), error: sinon.spy() };
   }
   setState(id, state) {
@@ -34,6 +35,12 @@ class FakeAdapter extends EventEmitter {
     return timer;
   }
   clearTimeout() {}
+  setInterval(fn, ms) {
+    const timer = { fn, ms };
+    this.intervals.push(timer);
+    return timer;
+  }
+  clearInterval() {}
 }
 const corePath = require.resolve('@iobroker/adapter-core');
 require.cache[corePath] = /** @type {NodeModule} */ (/** @type {unknown} */ ({
@@ -45,7 +52,7 @@ require.cache[corePath] = /** @type {NodeModule} */ (/** @type {unknown} */ ({
 const createRenault = require('./main.js');
 
 /**
- * @typedef {Omit<ReturnType<typeof createRenault>, 'requestClient' | 'json2iob' | 'log' | 'setState' | 'setTimeout' | 'clearTimeout'>
+ * @typedef {Omit<ReturnType<typeof createRenault>, 'requestClient' | 'json2iob' | 'log' | 'setState' | 'setTimeout' | 'clearTimeout' | 'setInterval' | 'clearInterval'>
  *   & FakeAdapter
  *   & { requestClient: sinon.SinonSpy; json2iob: { parse: sinon.SinonSpy } }} TestAdapter
  */
@@ -97,12 +104,6 @@ function setup(routes = {}) {
   return adapter;
 }
 
-/** Stop the intervals a successful start creates, so mocha can exit. */
-function stop(adapter) {
-  clearInterval(adapter.updateInterval);
-  clearInterval(adapter.refreshTokenInterval);
-}
-
 const urls = (adapter) => adapter.requestClient.getCalls().map((call) => call.args[0].url);
 const logged = (spy) => spy.getCalls().map((call) => String(call.args[0]));
 
@@ -110,11 +111,11 @@ describe('startup', () => {
   it('loads vehicles, polls and reports the connection after a successful login', async () => {
     const adapter = setup();
     await adapter.onReady();
-    stop(adapter);
     expect(adapter.deviceArray).to.deep.equal(['VIN1']);
     expect(urls(adapter).some((url) => url.includes('/cars/VIN1/battery-status'))).to.equal(true);
     expect(adapter.states['info.connection']).to.equal(true);
     expect(adapter.timeouts).to.have.length(0);
+    expect(adapter.intervals.map((timer) => timer.ms)).to.deep.equal([adapter.config.interval * 60 * 1000, 3500 * 1000]);
   });
 
   it('retries with growing, capped delay when the cloud is unreachable', async () => {
@@ -139,7 +140,6 @@ describe('startup', () => {
 
     adapter.requestClient = setup().requestClient;
     await adapter.timeouts.pop().fn();
-    stop(adapter);
     expect(adapter.deviceArray).to.deep.equal(['VIN1']);
     expect(adapter.updateInterval).to.not.equal(null);
   });
@@ -163,7 +163,6 @@ describe('startup', () => {
   it('accepts vehicles without vehicleDetails', async () => {
     const adapter = setup({ '/vehicles?': { vehicleLinks: [{ vin: 'VIN2', brand: 'DACIA' }] } });
     await adapter.onReady();
-    stop(adapter);
     expect(adapter.deviceArray).to.deep.equal(['VIN2']);
     expect(adapter.json2iob.parse.calledWith('VIN2.general')).to.equal(true);
   });
@@ -171,7 +170,6 @@ describe('startup', () => {
   it('does not list a vehicle twice when the list is loaded again', async () => {
     const adapter = setup();
     await adapter.onReady();
-    stop(adapter);
     await adapter.getDeviceList();
     expect(adapter.deviceArray).to.deep.equal(['VIN1']);
   });
@@ -181,10 +179,8 @@ describe('token refresh', () => {
   it('clears info.connection when the refresh fails', async () => {
     const adapter = setup();
     await adapter.onReady();
-    stop(adapter);
     adapter.requestClient = setup({ 'accounts.getJWT': httpError(500) }).requestClient;
     await adapter.refreshToken();
-    clearTimeout(adapter.reLoginTimeout ?? undefined);
     expect(adapter.states['info.connection']).to.equal(false);
   });
 });
@@ -207,7 +203,6 @@ describe('polling errors', () => {
   async function firstPoll(status) {
     const adapter = setup({ '/cars/VIN1/cockpit?': httpError(status) });
     await adapter.onReady();
-    stop(adapter);
     adapter.requestClient.resetHistory();
     await adapter.updateDevices();
     return urls(adapter).some((url) => url.includes('/cars/VIN1/cockpit?'));
@@ -233,7 +228,6 @@ describe('logging', () => {
     await failing.onReady();
     const working = setup({ '/cars/VIN1/location': leaky });
     await working.onReady();
-    stop(working);
     await working.refreshToken();
 
     for (const adapter of [failing, working]) {

@@ -33,8 +33,12 @@ class Renault extends utils.Adapter {
     this.brand = 'renault';
     /** @type {string[]} */
     this.accountTypes = [];
+    /** @type {ioBroker.Interval | undefined | null} */
     this.updateInterval = null;
+    /** @type {ioBroker.Interval | undefined | null} */
     this.refreshTokenInterval = null;
+    /** @type {ioBroker.Timeout | undefined | null} */
+    this.refreshTimeout = null;
     this.startAttempt = 0;
     this.loginRejected = false;
   }
@@ -61,7 +65,9 @@ class Renault extends utils.Adapter {
       this.log.info('Set interval to minimum 0.5');
       this.config.interval = 0.5;
     }
+    /** @type {ioBroker.Timeout | undefined | null} */
     this.reLoginTimeout = null;
+    /** @type {ioBroker.Timeout | undefined | null} */
     this.refreshTokenTimeout = null;
     this.country = this.config.country || 'de';
     this.brand = this.config.brand || 'renault';
@@ -111,13 +117,13 @@ class Renault extends utils.Adapter {
     if ((await this.login()) && (await this.getDeviceList())) {
       await this.migrateChargeHistoryV1();
       await this.updateDevices();
-      this.updateInterval = setInterval(
+      this.updateInterval = this.setInterval(
         async () => {
           await this.updateDevices();
         },
         this.config.interval * 60 * 1000,
       );
-      this.refreshTokenInterval = setInterval(() => {
+      this.refreshTokenInterval = this.setInterval(() => {
         this.refreshToken();
       }, 3500 * 1000);
       return;
@@ -585,8 +591,8 @@ class Renault extends utils.Adapter {
               if (error.response.status === 401) {
                 error.response && this.log.debug(JSON.stringify(error.response.data));
                 this.log.info(element.path + ' receive 401 error. Refresh Token in 60 seconds');
-                this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
-                this.refreshTokenTimeout = setTimeout(() => {
+                this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
+                this.refreshTokenTimeout = this.setTimeout(() => {
                   this.refreshToken();
                 }, 1000 * 60);
 
@@ -651,7 +657,7 @@ class Renault extends utils.Adapter {
         this.log.error('refresh token failed: ' + error);
         error.response && this.log.error(JSON.stringify(error.response.data));
         this.log.error('Start relogin in 1min');
-        this.reLoginTimeout = setTimeout(
+        this.reLoginTimeout = this.setTimeout(
           () => {
             this.login();
           },
@@ -677,11 +683,11 @@ class Renault extends utils.Adapter {
   onUnload(callback) {
     try {
       this.setState('info.connection', false, true);
-      clearTimeout(this.refreshTimeout);
-      this.reLoginTimeout && clearTimeout(this.reLoginTimeout);
-      this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
-      this.updateInterval && clearInterval(this.updateInterval);
-      this.refreshTokenInterval && clearInterval(this.refreshTokenInterval);
+      this.clearTimeout(this.refreshTimeout);
+      this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
+      this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
+      this.updateInterval && this.clearInterval(this.updateInterval);
+      this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       callback();
     } catch (e) {
       this.log.error('Error onUnload: ' + e);
@@ -763,8 +769,8 @@ class Renault extends utils.Adapter {
               this.log.error(JSON.stringify(error.response.data));
             }
           });
-        clearTimeout(this.refreshTimeout);
-        this.refreshTimeout = setTimeout(async () => {
+        this.clearTimeout(this.refreshTimeout);
+        this.refreshTimeout = this.setTimeout(async () => {
           await this.updateDevices();
         }, 20 * 1000);
       }
