@@ -7,7 +7,7 @@
 // The adapter-core module gives you access to the core ioBroker functions
 // you need to create an adapter
 const utils = require('@iobroker/adapter-core');
-const axios = require('axios').default;
+const axios = require('axios');
 const qs = require('qs');
 const Json2iob = require('json2iob');
 
@@ -555,6 +555,7 @@ class Renault extends utils.Adapter {
               data = res.data.data.attributes;
             }
 
+            /** @type {boolean | undefined} */
             let forceIndex = undefined;
             const preferedArrayName = undefined;
 
