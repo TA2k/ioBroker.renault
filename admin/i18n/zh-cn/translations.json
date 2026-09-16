@@ -3,6 +3,8 @@
   "App Email": "应用邮箱",
   "App Password": "应用密码",
   "Country": "国家",
+  "Brand": "品牌",
+  "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia 和 Alpine 使用不同的账户和 API 密钥",
   "Two-letter country code, e.g. de, fr, it, es": "两位字母的国家代码，例如 de, fr, it, es",
   "Polling": "轮询",
   "Update interval in minutes": "更新间隔（分钟）",
