@@ -80,32 +80,6 @@
         "pl": "Naprawiono start ładowania i zmniejszono logi błędów",
         "uk": "Виправлено старт зарядки та зменшено журнали помилок",
         "zh-cn": "修复充电启动并减少错误日志"
-      },
-      "0.0.14": {
-        "en": "add charging stop",
-        "de": "Ladestopp hinzugefügt",
-        "ru": "Добавлена остановка зарядки",
-        "pt": "Adicionada paragem de carga",
-        "nl": "Stoppen van het laden toegevoegd",
-        "fr": "Ajout de l'arrêt de la charge",
-        "it": "Aggiunto stop della carica",
-        "es": "Añadida parada de carga",
-        "pl": "Dodano zatrzymanie ładowania",
-        "uk": "Додано зупинку зарядки",
-        "zh-cn": "添加充电停止"
-      },
-      "0.0.13": {
-        "en": "add remote object for force refresh",
-        "de": "Remote-Objekt für erzwungene Aktualisierung hinzugefügt",
-        "ru": "Добавлен удалённый объект для принудительного обновления",
-        "pt": "Adicionado objeto remoto para forçar atualização",
-        "nl": "Remote-object voor geforceerde verversing toegevoegd",
-        "fr": "Ajout d'un objet distant pour le rafraîchissement forcé",
-        "it": "Aggiunto oggetto remoto per il refresh forzato",
-        "es": "Añadido objeto remoto para actualización forzada",
-        "pl": "Dodano obiekt zdalny do wymuszonego odświeżenia",
-        "uk": "Додано віддалений об'єкт для примусового оновлення",
-        "zh-cn": "添加用于强制刷新的 remote 对象"
       }
     },
     "titleLang": {

@@ -3,6 +3,8 @@
   "App Email": "Електронна пошта застосунку",
   "App Password": "Пароль застосунку",
   "Country": "Країна",
+  "Brand": "Марка",
+  "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia та Alpine використовують різні облікові записи та API-ключі",
   "Two-letter country code, e.g. de, fr, it, es": "Дволітерний код країни, наприклад de, fr, it, es",
   "Polling": "Опитування",
   "Update interval in minutes": "Інтервал оновлення в хвилинах",
