@@ -128,8 +128,6 @@ class Renault extends utils.Adapter {
     this.config.interval = bounded;
     /** @type {ioBroker.Timeout | undefined | null} */
     this.reLoginTimeout = null;
-    /** @type {ioBroker.Timeout | undefined | null} */
-    this.refreshTokenTimeout = null;
     const country = String(this.config.country ?? '')
       .trim()
       .toLowerCase();
@@ -505,7 +503,10 @@ class Renault extends utils.Adapter {
     }
   }
 
-  async updateDevices() {
+  /**
+   * @param {boolean} [isRetry] true for the single repeat after a token refresh
+   */
+  async updateDevices(isRetry = false) {
     if (!this.account?.accountId) {
       this.log.error('No accountId found');
       return;
@@ -672,6 +673,17 @@ class Renault extends utils.Adapter {
           this.pauseForQuota();
           return;
         }
+        if (outcome === 'unauthorized') {
+          if (isRetry) {
+            this.log.warn('The Renault cloud still answers 401 after a token refresh. Next attempt at the next poll');
+            return;
+          }
+          this.log.info('Token expired during the poll, refreshing it');
+          if (await this.refreshToken()) {
+            await this.updateDevices(true);
+          }
+          return;
+        }
       }
     }
     this.quotaStrikes = 0;
@@ -684,7 +696,7 @@ class Renault extends utils.Adapter {
    * @param {string} vin
    * @param {Endpoint} element
    * @param {Record<string, string>} headers
-   * @returns {Promise<'ok' | 'quota' | 'failed'>}
+   * @returns {Promise<'ok' | 'quota' | 'unauthorized' | 'failed'>}
    */
   async pollEndpoint(vin, element, headers) {
     let res;
@@ -727,7 +739,7 @@ class Renault extends utils.Adapter {
    * @param {string} vin
    * @param {Endpoint} element
    * @param {any} error
-   * @returns {'quota' | 'failed'}
+   * @returns {'quota' | 'unauthorized' | 'failed'}
    */
   handlePollError(vin, element, error) {
     const status = error.response?.status;
@@ -735,13 +747,8 @@ class Renault extends utils.Adapter {
       return 'quota';
     }
     if (status === 401) {
-      this.log.debug(JSON.stringify(error.response.data));
-      this.log.info(element.path + ' receive 401 error. Refresh Token in 60 seconds');
-      this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
-      this.refreshTokenTimeout = this.setTimeout(() => {
-        this.refreshToken();
-      }, 1000 * 60);
-      return 'failed';
+      this.log.debug(element.path + ' for ' + vin + ' answered 401');
+      return 'unauthorized';
     }
     if (this.firstUpdate && (status === 400 || status === 403 || status === 404)) {
       if (!this.ignoreState[vin]) {
@@ -858,7 +865,6 @@ class Renault extends utils.Adapter {
       this.setState('info.connection', false, true);
       this.pollTimeout && this.clearTimeout(this.pollTimeout);
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
-      this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       callback();
     } catch (e) {

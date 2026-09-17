@@ -553,3 +553,64 @@ describe('relogin', () => {
     expect(adapter.requestClient.called).to.equal(false);
   });
 });
+
+describe('expired token during a poll', () => {
+  const battery = (adapter) => urls(adapter).filter((url) => url.includes('/battery-status'));
+  const kamereon = (adapter) => urls(adapter).filter((url) => url.includes('/kamereon/'));
+  const refreshes = (adapter) => urls(adapter).filter((url) => url.includes('accounts.getJWT'));
+
+  async function afterStartup(routes) {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.requestClient = setup(routes).requestClient;
+    return adapter;
+  }
+
+  it('stops the cycle, refreshes once and repeats the cycle once', async () => {
+    let expired = true;
+    const adapter = await afterStartup({ '/battery-status': () => (expired ? ((expired = false), httpError(401)) : {}) });
+    await adapter.updateDevices();
+    expect(refreshes(adapter)).to.have.length(1);
+    expect(battery(adapter)).to.have.length(2);
+    // nothing between the 401 and the repeat, and the repeat requests the other endpoints
+    expect(
+      kamereon(adapter)
+        .slice(0, 2)
+        .every((url) => url.includes('/battery-status')),
+    ).to.equal(true);
+    expect(
+      kamereon(adapter)
+        .slice(2)
+        .some((url) => url.includes('/lock-status')),
+    ).to.equal(true);
+  });
+
+  it('does not try a third time when the repeat gets a 401 too', async () => {
+    const adapter = await afterStartup({ '/battery-status': httpError(401) });
+    await adapter.updateDevices();
+    expect(refreshes(adapter)).to.have.length(1);
+    expect(kamereon(adapter)).to.have.length(2);
+    expect(logged(adapter.log.warn).some((line) => line.includes('401'))).to.equal(true);
+  });
+
+  it('does not repeat the cycle when the refresh fails', async () => {
+    const adapter = await afterStartup({ '/battery-status': httpError(401), 'accounts.getJWT': httpError(500) });
+    await adapter.updateDevices();
+    expect(kamereon(adapter)).to.have.length(1);
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(60 * 1000);
+  });
+
+  it('stops the endpoints of the other vehicles too', async () => {
+    const adapter = setup({ '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] } });
+    await adapter.onReady();
+    adapter.requestClient = setup({ '/cars/VIN1/battery-status': httpError(401), 'accounts.getJWT': httpError(500) }).requestClient;
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes('VIN2'))).to.deep.equal([]);
+  });
+
+  it('leaves no 60-second refresh timer behind', async () => {
+    const adapter = await afterStartup({ '/battery-status': httpError(401) });
+    await adapter.updateDevices();
+    expect(adapter.timeouts.filter((timer) => timer.ms === 60 * 1000)).to.deep.equal([]);
+  });
+});
