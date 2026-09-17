@@ -64,7 +64,7 @@
     "interval": {
       "type": "number",
       "label": "Update interval in minutes",
-      "min": 1,
+      "min": 5,
       "max": 1440,
       "newLine": true,
       "xs": 12,

@@ -166,7 +166,7 @@
     "brand": "renault",
     "password": "",
     "apiKeyUpdate": "",
-    "interval": 10,
+    "interval": 15,
     "disableChargeFetching": false,
     "chargeHistoryLimit": 100
   },

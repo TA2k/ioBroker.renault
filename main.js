@@ -11,6 +11,9 @@ const axios = require('axios');
 const qs = require('qs');
 const Json2iob = require('json2iob');
 
+const MIN_INTERVAL_MINUTES = 5;
+const MAX_INTERVAL_MINUTES = 1440;
+
 class Renault extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -62,10 +65,23 @@ class Renault extends utils.Adapter {
   async onReady() {
     // Reset the connection indicator during startup
     this.setState('info.connection', false, true);
-    if (this.config.interval < 0.5) {
-      this.log.info('Set interval to minimum 0.5');
-      this.config.interval = 0.5;
+    const interval = Number(this.config.interval);
+    const bounded = Number.isFinite(interval)
+      ? Math.min(Math.max(interval, MIN_INTERVAL_MINUTES), MAX_INTERVAL_MINUTES)
+      : MIN_INTERVAL_MINUTES;
+    if (bounded !== interval) {
+      this.log.info(
+        'Update interval ' +
+          this.config.interval +
+          ' is outside ' +
+          MIN_INTERVAL_MINUTES +
+          ' to ' +
+          MAX_INTERVAL_MINUTES +
+          ' minutes, using ' +
+          bounded,
+      );
     }
+    this.config.interval = bounded;
     /** @type {ioBroker.Timeout | undefined | null} */
     this.reLoginTimeout = null;
     /** @type {ioBroker.Timeout | undefined | null} */
@@ -104,7 +120,7 @@ class Renault extends utils.Adapter {
       this.apiKeyUpdate = this.config.apiKeyUpdate;
     }
 
-    this.subscribeStates('*');
+    this.subscribeStates('*.remote.*');
 
     await this.connectAndPoll();
   }

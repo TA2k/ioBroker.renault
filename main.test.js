@@ -2,108 +2,14 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { EventEmitter } = require('node:events');
-
-// Replace @iobroker/adapter-core with a minimal in-memory adapter before main.js loads it.
-class FakeAdapter extends EventEmitter {
-  constructor() {
-    super();
-    this.config = {};
-    this.states = {};
-    this.timeouts = [];
-    this.intervals = [];
-    this.log = { debug: sinon.spy(), info: sinon.spy(), warn: sinon.spy(), error: sinon.spy() };
-  }
-  setState(id, state) {
-    this.states[id] = state !== null && typeof state === 'object' ? state.val : state;
-    return Promise.resolve();
-  }
-  getStateAsync(id) {
-    return Promise.resolve(id in this.states ? { val: this.states[id] } : null);
-  }
-  setObjectNotExistsAsync() {
-    return Promise.resolve();
-  }
-  setObjectNotExists() {}
-  delObjectAsync() {
-    return Promise.resolve();
-  }
-  subscribeStates() {}
-  setTimeout(fn, ms) {
-    const timer = { fn, ms };
-    this.timeouts.push(timer);
-    return timer;
-  }
-  clearTimeout() {}
-  setInterval(fn, ms) {
-    const timer = { fn, ms };
-    this.intervals.push(timer);
-    return timer;
-  }
-  clearInterval() {}
-}
-const corePath = require.resolve('@iobroker/adapter-core');
-require.cache[corePath] = /** @type {NodeModule} */ (
-  /** @type {unknown} */ ({
-    id: corePath,
-    filename: corePath,
-    loaded: true,
-    exports: { Adapter: FakeAdapter },
-  })
-);
+const { createTestAdapter, httpError, ACCOUNT } = require('./test/fakeAdapter');
 const createRenault = require('./main.js');
 
-/**
- * @typedef {Omit<ReturnType<typeof createRenault>, 'requestClient' | 'json2iob' | 'log' | 'setState' | 'setTimeout' | 'clearTimeout' | 'setInterval' | 'clearInterval'>
- *   & FakeAdapter
- *   & { requestClient: sinon.SinonSpy; json2iob: { parse: sinon.SinonSpy } }} TestAdapter
- */
-
-/** @returns {TestAdapter} */
-function createAdapter() {
-  return /** @type {TestAdapter} */ (/** @type {unknown} */ (createRenault()));
-}
+const setup = createTestAdapter;
 
 /** @param {unknown} val */
 function userWrite(val) {
   return /** @type {ioBroker.State} */ (/** @type {unknown} */ ({ val, ack: false }));
-}
-
-const ACCOUNT = { accountId: 'acc-1', accountType: 'MYRENAULT', accountStatus: 'ACTIVE' };
-const VEHICLE = { vin: 'VIN1', brand: 'RENAULT', vehicleDetails: { modelSCR: 'ZOE', model: { label: ' R135' } } };
-
-/** Build an HTTP error shaped like an axios error. */
-function httpError(status, config = {}) {
-  const error = new Error('Request failed with status code ' + status);
-  Object.assign(error, { response: { status, data: { status } }, config });
-  return error;
-}
-
-/**
- * Create an adapter whose HTTP client answers per URL fragment.
- * A route value is either a response body or an Error to reject with.
- */
-function setup(routes = {}) {
-  const adapter = createAdapter();
-  adapter.config = { ...require('./io-package.json').native, username: 'user@example.com', password: 'secret' };
-  const defaults = {
-    'hacf-fr': new Error('offline'),
-    'accounts.login': { sessionInfo: { cookieValue: 'COOKIE' } },
-    'accounts.getJWT': { id_token: 'ID_TOKEN' },
-    '/connection': { currentUser: { accounts: [ACCOUNT] } },
-    '/vehicles?': { vehicleLinks: [VEHICLE] },
-  };
-  const all = { ...defaults, ...routes };
-  adapter.requestClient = sinon.spy(async (request) => {
-    const key = Object.keys(all).find((fragment) => request.url.includes(fragment));
-    const answer = key === undefined ? {} : all[key];
-    if (answer instanceof Error) {
-      throw answer;
-    }
-    return { data: answer };
-  });
-  adapter.json2iob.parse = sinon.spy();
-  return adapter;
 }
 
 const urls = (adapter) => adapter.requestClient.getCalls().map((call) => call.args[0].url);
@@ -126,6 +32,9 @@ describe('startup', () => {
     const delays = [];
     for (let i = 0; i < 6; i++) {
       const timer = adapter.timeouts.pop();
+      if (!timer) {
+        throw new Error('no retry timer');
+      }
       delays.push(timer.ms / 60000);
       await timer.fn();
     }
@@ -141,7 +50,7 @@ describe('startup', () => {
     expect(adapter.states['info.connection']).to.equal(true);
 
     adapter.requestClient = setup().requestClient;
-    await adapter.timeouts.pop().fn();
+    await adapter.timeouts.pop()?.fn();
     expect(adapter.deviceArray).to.deep.equal(['VIN1']);
     expect(adapter.updateInterval).to.not.equal(null);
   });
@@ -266,5 +175,41 @@ describe('logging', () => {
         expect(lines.filter((line) => line.includes(secret))).to.deep.equal([]);
       }
     }
+  });
+});
+
+describe('update interval', () => {
+  const cases = [
+    [0, 5],
+    [4.9, 5],
+    [5, 5],
+    [15, 15],
+    ['15', 15],
+    [1440, 1440],
+    [1441, 1440],
+    [-1, 5],
+    ['abc', 5],
+    [null, 5],
+  ];
+  for (const [configured, expected] of cases) {
+    it(`uses ${expected} minutes for a configured ${JSON.stringify(configured)}`, async () => {
+      const adapter = setup();
+      adapter.config.interval = /** @type {any} */ (configured);
+      await adapter.onReady();
+      expect(adapter.config.interval).to.equal(expected);
+    });
+  }
+
+  it('defaults to 15 minutes for new installations', () => {
+    expect(require('./io-package.json').native.interval).to.equal(15);
+    expect(require('./admin/jsonConfig.json').items.interval.min).to.equal(5);
+  });
+});
+
+describe('subscriptions', () => {
+  it('subscribes only to the remote states', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    expect(adapter.subscribeStates.args).to.deep.equal([['*.remote.*']]);
   });
 });
