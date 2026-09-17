@@ -13,6 +13,38 @@ const Json2iob = require('json2iob');
 
 const MIN_INTERVAL_MINUTES = 5;
 const MAX_INTERVAL_MINUTES = 1440;
+/** Locales of the My Renault app as listed in renault-api const.py; the first match per country wins. */
+const LOCALES = [
+  'bg-BG',
+  'cs-CZ',
+  'da-DK',
+  'de-DE',
+  'de-AT',
+  'de-CH',
+  'en-GB',
+  'en-IE',
+  'es-ES',
+  'es-MX',
+  'fi-FI',
+  'fr-FR',
+  'fr-BE',
+  'fr-CH',
+  'fr-LU',
+  'hr-HR',
+  'hu-HU',
+  'it-IT',
+  'it-CH',
+  'nl-NL',
+  'nl-BE',
+  'no-NO',
+  'pl-PL',
+  'pt-PT',
+  'ro-RO',
+  'ru-RU',
+  'sk-SK',
+  'sl-SI',
+  'sv-SE',
+];
 const KAMEREON_KEY_URL = 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py';
 // Kamereon key of the My Renault app; renault-api and db-EV/ZoePHP update theirs by hand after Renault changes it.
 const BUNDLED_KAMEREON_KEY = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
@@ -50,6 +82,8 @@ class Renault extends utils.Adapter {
     this.startAttempt = 0;
     this.loginRejected = false;
     this.apiKeyUpdate = BUNDLED_KAMEREON_KEY;
+    this.country = 'de';
+    this.locale = 'de-DE';
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -91,7 +125,18 @@ class Renault extends utils.Adapter {
     this.reLoginTimeout = null;
     /** @type {ioBroker.Timeout | undefined | null} */
     this.refreshTokenTimeout = null;
-    this.country = this.config.country || 'de';
+    const country = String(this.config.country ?? '')
+      .trim()
+      .toLowerCase();
+    if (/^[a-z]{2}$/.test(country)) {
+      this.country = country;
+    } else {
+      if (country) {
+        this.log.warn('Country "' + this.config.country + '" is not a two-letter code, using de');
+      }
+      this.country = 'de';
+    }
+    this.locale = LOCALES.find((locale) => locale.endsWith('-' + this.country.toUpperCase())) || 'de-DE';
     this.brand = this.config.brand || 'renault';
     this.session = {};
     //DE API Key (shared by Renault, Dacia and Alpine - same Gigya/Kamereon tenant)
@@ -218,7 +263,7 @@ class Renault extends utils.Adapter {
       headers: {
         'User-Agent': this.userAgent,
         Accept: '*/*',
-        'Accept-Language': 'de-de',
+        'Accept-Language': this.locale.toLowerCase(),
         'Cache-Control': 'no-cache',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -255,7 +300,7 @@ class Renault extends utils.Adapter {
       headers: {
         'User-Agent': this.userAgent,
         Accept: '*/*',
-        'Accept-Language': 'de-de',
+        'Accept-Language': this.locale.toLowerCase(),
         'Cache-Control': 'no-cache',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -283,16 +328,20 @@ class Renault extends utils.Adapter {
     return await this.requestClient({
       method: 'post',
       url:
-        'https://apis.renault.com/myr/api/v1/connection?&country=DE&product=' +
+        'https://apis.renault.com/myr/api/v1/connection?&country=' +
+        this.country.toUpperCase() +
+        '&product=' +
         this.product +
-        '&locale=de-DE&displayAccounts=' +
+        '&locale=' +
+        this.locale +
+        '&displayAccounts=' +
         this.product,
       headers: {
         'Content-Type': 'application/json',
         Accept: '*/*',
         'User-Agent': this.userAgent,
         apiKey: this.apiKeyUpdate,
-        'Accept-Language': 'de-de',
+        'Accept-Language': this.locale.toLowerCase(),
         'x-gigya-id_token': this.session.id_token,
       },
     })
@@ -343,7 +392,7 @@ class Renault extends utils.Adapter {
         'content-type': 'application/json',
         accept: '*/*',
         'user-agent': this.userAgent,
-        'accept-language': 'de-de',
+        'accept-language': this.locale.toLowerCase(),
         'x-gigya-id_token': this.session.id_token,
         'X-Amzn-Trace-Id': this.buildTraceId(),
       },
@@ -594,7 +643,7 @@ class Renault extends utils.Adapter {
       'content-type': 'application/json',
       accept: '*/*',
       'user-agent': this.userAgent,
-      'accept-language': 'de-de',
+      'accept-language': this.locale.toLowerCase(),
       'x-gigya-id_token': this.session.id_token,
     };
     for (const vin of this.deviceArray) {
@@ -693,7 +742,7 @@ class Renault extends utils.Adapter {
       headers: {
         'User-Agent': this.userAgent,
         Accept: '*/*',
-        'Accept-Language': 'de-de',
+        'Accept-Language': this.locale.toLowerCase(),
         'Cache-Control': 'no-cache',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -810,7 +859,7 @@ class Renault extends utils.Adapter {
             'content-type': 'application/vnd.api+json',
             accept: '*/*',
             'user-agent': this.userAgent,
-            'accept-language': 'de-de',
+            'accept-language': this.locale.toLowerCase(),
             'x-gigya-id_token': this.session.id_token,
             'X-Amzn-Trace-Id': this.buildTraceId(),
           },

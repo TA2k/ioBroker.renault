@@ -323,3 +323,49 @@ describe('Kamereon API key', () => {
     expect(lines.filter((line) => line.includes(KEY) || line.includes(BUNDLED) || line.includes('short'))).to.deep.equal([]);
   });
 });
+
+describe('country and locale', () => {
+  /** @type {[unknown, string, string, string][]} */
+  const cases = [
+    ['fr', 'FR', 'fr-FR', 'fr'],
+    ['FR', 'FR', 'fr-FR', 'fr'],
+    [' it ', 'IT', 'it-IT', 'it'],
+    ['ch', 'CH', 'de-CH', 'ch'],
+    ['be', 'BE', 'fr-BE', 'be'],
+    ['us', 'US', 'de-DE', 'us'],
+    ['', 'DE', 'de-DE', 'de'],
+    ['FRA', 'DE', 'de-DE', 'de'],
+    ['f', 'DE', 'de-DE', 'de'],
+    ['1a', 'DE', 'de-DE', 'de'],
+    [null, 'DE', 'de-DE', 'de'],
+  ];
+  for (const [configured, country, locale, kamereonCountry] of cases) {
+    it(`uses ${country} / ${locale} for ${JSON.stringify(configured)}`, async () => {
+      const adapter = setup();
+      adapter.config.country = /** @type {any} */ (configured);
+      await adapter.onReady();
+      const requests = adapter.requestClient.getCalls().map((call) => call.args[0]);
+      const connection = requests.find((request) => request.url.includes('/connection'));
+      expect(connection.url)
+        .to.include('country=' + country + '&')
+        .and.to.include('locale=' + locale + '&');
+      const battery = requests.find((request) => request.url.includes('/battery-status'));
+      expect(battery.url).to.match(new RegExp('country=' + kamereonCountry + '$'));
+      const languages = requests
+        .map((request) => request.headers?.['Accept-Language'] ?? request.headers?.['accept-language'])
+        .filter(Boolean);
+      expect(new Set(languages)).to.deep.equal(new Set([locale.toLowerCase()]));
+    });
+  }
+
+  it('warns about an invalid country but not about an empty one', async () => {
+    const invalid = setup();
+    invalid.config.country = 'FRA';
+    await invalid.onReady();
+    expect(logged(invalid.log.warn).some((line) => line.includes('FRA'))).to.equal(true);
+    const empty = setup();
+    empty.config.country = '';
+    await empty.onReady();
+    expect(logged(empty.log.warn).some((line) => line.includes('Country'))).to.equal(false);
+  });
+});
