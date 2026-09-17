@@ -264,3 +264,62 @@ describe('poll scheduling', () => {
     expect(callback.calledOnce).to.equal(true);
   });
 });
+
+describe('Kamereon API key', () => {
+  const BUNDLED = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
+  const KEY = 'LookedUpKey0123456789ab';
+  /** Layout of renault-api const.py on 2026-09-17: the CONF_ line comes first. */
+  const constPy = (line) =>
+    ['CONF_KAMEREON_APIKEY = "kamereon-api-key"', '', line, '', '    CONF_KAMEREON_APIKEY: KAMEREON_APIKEY,'].join('\n');
+  const keyUsed = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .find((request) => request.url.includes('/connection')).headers.apiKey;
+  const lookups = (adapter) => urls(adapter).filter((url) => url.includes('hacf-fr'));
+
+  const cases = [
+    ["today's layout", constPy(`KAMEREON_APIKEY = "${KEY}"`), KEY],
+    ['Windows line endings', constPy(`KAMEREON_APIKEY = "${KEY}"`).replace(/\n/g, '\r\n'), KEY],
+    ['a key of 20 characters', constPy(`KAMEREON_APIKEY = "${'a'.repeat(20)}"`), 'a'.repeat(20)],
+    ['a key of 64 characters', constPy(`KAMEREON_APIKEY = "${'a'.repeat(64)}"`), 'a'.repeat(64)],
+    ['only the CONF_ line', constPy(''), BUNDLED],
+    ['a key of 19 characters', constPy(`KAMEREON_APIKEY = "${'a'.repeat(19)}"`), BUNDLED],
+    ['a key of 65 characters', constPy(`KAMEREON_APIKEY = "${'a'.repeat(65)}"`), BUNDLED],
+    ['invalid characters', constPy('KAMEREON_APIKEY = "LookedUp-Key0123456789"'), BUNDLED],
+    ['an indented line', constPy(`    KAMEREON_APIKEY = "${KEY}"`), BUNDLED],
+    ['a JSON body', { KAMEREON_APIKEY: KEY }, BUNDLED],
+    ['a failed request', httpError(404), BUNDLED],
+  ];
+  for (const [name, body, expected] of cases) {
+    it(`uses ${expected === BUNDLED ? 'the bundled key' : 'the looked-up key'} for ${name}`, async () => {
+      const adapter = setup({ 'hacf-fr': body });
+      await adapter.onReady();
+      expect(keyUsed(adapter)).to.equal(expected);
+    });
+  }
+
+  it('prefers a valid key from the settings and skips the lookup', async () => {
+    const adapter = setup({ 'hacf-fr': constPy(`KAMEREON_APIKEY = "${KEY}"`) });
+    adapter.config.apiKeyUpdate = ' SettingsKey0123456789ab ';
+    await adapter.onReady();
+    expect(keyUsed(adapter)).to.equal('SettingsKey0123456789ab');
+    expect(lookups(adapter)).to.deep.equal([]);
+  });
+
+  it('ignores an invalid key from the settings with a warning', async () => {
+    const adapter = setup({ 'hacf-fr': constPy(`KAMEREON_APIKEY = "${KEY}"`) });
+    adapter.config.apiKeyUpdate = 'short';
+    await adapter.onReady();
+    expect(keyUsed(adapter)).to.equal(KEY);
+    expect(logged(adapter.log.warn).some((line) => line.includes('API key'))).to.equal(true);
+  });
+
+  it('never logs a key', async () => {
+    const adapter = setup({ 'hacf-fr': constPy(`KAMEREON_APIKEY = "${KEY}"`) });
+    adapter.config.apiKeyUpdate = 'short';
+    await adapter.onReady();
+    const lines = Object.values(adapter.log).flatMap((spy) => logged(spy));
+    expect(lines.filter((line) => line.includes(KEY) || line.includes(BUNDLED) || line.includes('short'))).to.deep.equal([]);
+  });
+});

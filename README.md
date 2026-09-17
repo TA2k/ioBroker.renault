@@ -52,6 +52,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning
 - (typhosj) polls no longer overlap: a manual refresh or a command during a running poll waits for it
 - (typhosj) the update interval is at least 5 minutes (15 minutes for new installations), and the adapter only listens to its remote states
 - (typhosj) requests to the Renault cloud time out after 30 seconds, so one unanswered request no longer stalls polling

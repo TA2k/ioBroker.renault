@@ -13,6 +13,11 @@ const Json2iob = require('json2iob');
 
 const MIN_INTERVAL_MINUTES = 5;
 const MAX_INTERVAL_MINUTES = 1440;
+const KAMEREON_KEY_URL = 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py';
+// Kamereon key of the My Renault app; renault-api and db-EV/ZoePHP update theirs by hand after Renault changes it.
+const BUNDLED_KAMEREON_KEY = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
+const KAMEREON_KEY = /^[A-Za-z0-9]{20,64}$/;
+const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
 
 class Renault extends utils.Adapter {
   /**
@@ -44,6 +49,7 @@ class Renault extends utils.Adapter {
     this.polling = false;
     this.startAttempt = 0;
     this.loginRejected = false;
+    this.apiKeyUpdate = BUNDLED_KAMEREON_KEY;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -90,7 +96,6 @@ class Renault extends utils.Adapter {
     this.session = {};
     //DE API Key (shared by Renault, Dacia and Alpine - same Gigya/Kamereon tenant)
     this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
-    this.apiKeyUpdate = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
     if (this.brand === 'alpine') {
       this.product = 'MYALPINE';
       this.accountTypes = ['MYALPINE'];
@@ -98,30 +103,41 @@ class Renault extends utils.Adapter {
       this.product = 'MYRENAULT';
       this.accountTypes = ['MYRENAULT', 'MYDACIA'];
     }
-    try {
-      await this.requestClient({
-        method: 'get',
-        url: 'https://raw.githubusercontent.com/hacf-fr/renault-api/main/src/renault_api/const.py',
-      })
-
-        .then((res) => {
-          if (res.data.split('KAMEREON_APIKEY = "')[2] && res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0]) {
-            this.apiKeyUpdate = res.data.split('KAMEREON_APIKEY = "')[2].split('"')[0];
-          }
-        })
-        .catch((error) => {
-          this.log.debug('API key lookup failed: ' + error);
-        });
-    } catch (error) {
-      this.log.debug('API key lookup failed: ' + error);
-    }
-    if (this.config.apiKeyUpdate) {
-      this.apiKeyUpdate = this.config.apiKeyUpdate;
-    }
+    this.apiKeyUpdate = await this.resolveKamereonKey();
 
     this.subscribeStates('*.remote.*');
 
     await this.connectAndPoll();
+  }
+
+  /**
+   * The Kamereon key comes from the settings, else from renault-api (repairs the adapter without a
+   * release after Renault changes the key), else from this file. The key itself is never logged.
+   *
+   * @returns {Promise<string>}
+   */
+  async resolveKamereonKey() {
+    const configured = String(this.config.apiKeyUpdate ?? '').trim();
+    if (KAMEREON_KEY.test(configured)) {
+      this.log.debug('Kamereon API key: adapter settings');
+      return configured;
+    }
+    if (configured) {
+      this.log.warn('The API key in the adapter settings is not valid (20 to 64 letters and digits), it is ignored');
+    }
+    try {
+      const res = await this.requestClient({ method: 'get', url: KAMEREON_KEY_URL, responseType: 'text' });
+      const match = typeof res.data === 'string' ? KAMEREON_KEY_LINE.exec(res.data) : null;
+      if (match) {
+        this.log.debug('Kamereon API key: renault-api lookup');
+        return match[1];
+      }
+      this.log.debug('Kamereon API key lookup found no valid key');
+    } catch (error) {
+      this.log.debug('Kamereon API key lookup failed: ' + error);
+    }
+    this.log.debug('Kamereon API key: bundled');
+    return BUNDLED_KAMEREON_KEY;
   }
 
   /**
