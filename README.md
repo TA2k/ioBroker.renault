@@ -54,6 +54,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) breaking: battery, range, mileage, fuel and temperature states get units and specific roles, and data states are read-only
 - (typhosj) breaking: the command states use the roles switch, button.start and level.temperature instead of button and value
 - (typhosj) commands are confirmed with ack after the cloud accepted them, and errors are written to remote.lastError; stop charging sends "stop", charge/start uses the KCM endpoint
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"

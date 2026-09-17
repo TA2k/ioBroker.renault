@@ -1103,3 +1103,81 @@ describe('remote objects', () => {
     expect(common(adapter, 'actions/hvac-start')).to.include({ role: 'switch' });
   });
 });
+
+describe('vehicle data objects', () => {
+  const Json2iob = require('json2iob');
+  const { fixtureRoutes } = require('./test/fakeAdapter');
+  // Strings that look numeric but are dates, clock times or codes, not measurements.
+  const TEXT_KEYS = new Set(['day', 'month', 'startTime', 'code']);
+
+  /** @returns {string[]} key=value of every numeric-looking string outside TEXT_KEYS */
+  function numericStrings(value, key = '', found = []) {
+    if (typeof value === 'string') {
+      if (value.trim() !== '' && Number.isFinite(Number(value)) && !TEXT_KEYS.has(key)) {
+        found.push(key + '=' + value);
+      }
+    } else if (value && typeof value === 'object') {
+      for (const [childKey, child] of Object.entries(value)) {
+        numericStrings(child, Array.isArray(value) ? key : childKey, found);
+      }
+    }
+    return found;
+  }
+
+  const FIXTURES = {
+    'battery-status': ['battery-status.1.json', 'battery-status.renault_5.json'],
+    cockpit: ['cockpit.zoe_50.json', 'cockpit.captur_ii.json'],
+    'hvac-status': ['hvac-status.zoe_50.json', 'hvac-status.renault_5.json'],
+    'charge-history': ['charge-history.day.json'],
+    charges: ['charges.json'],
+    'charging-settings': ['charging-settings.single.json'],
+    'res-state': ['res-state.1.json'],
+  };
+  for (const [path, files] of Object.entries(FIXTURES)) {
+    for (const file of files) {
+      it(`hands no numbers as strings to json2iob for ${file}`, async () => {
+        useClock();
+        const adapter = setup({ ['/cars/VIN1/' + path + '?']: require('./test/fixtures/renault-api/' + file) });
+        await adapter.onReady();
+        const payloads = adapter.json2iob.parse
+          .getCalls()
+          .filter((call) => call.args[0] === 'VIN1.' + path)
+          .map((call) => call.args[1]);
+        expect(payloads).to.not.be.empty;
+        expect(payloads.flatMap((payload) => numericStrings(payload))).to.deep.equal([]);
+      });
+    }
+  }
+
+  async function withObjects() {
+    useClock();
+    const adapter = setup(fixtureRoutes());
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    return (id) => adapter.objects.get('renault.0.VIN1.' + id)?.common;
+  }
+
+  it('gives known measurements a unit and a specific role', async () => {
+    const common = await withObjects();
+    expect(common('battery-status.batteryLevel')).to.include({ type: 'number', role: 'value.battery', unit: '%', write: false });
+    expect(common('battery-status.batteryAutonomy')).to.include({ type: 'number', role: 'value.distance', unit: 'km', write: false });
+    expect(common('battery-status.chargingRemainingTime')).to.include({ type: 'number', unit: 'min' });
+    expect(common('cockpitv2.totalMileage')).to.include({ type: 'number', role: 'value.distance', unit: 'km' });
+    expect(common('cockpitv2.fuelQuantity')).to.include({ type: 'number', role: 'value.fill', unit: 'l' });
+    // json2iob with forceIndex names array entries <key>01, <key>02, … (checked with json2iob 2.6.25)
+    expect(common('charges.charges01.chargeStartBatteryLevel')).to.include({ type: 'number', unit: '%' });
+  });
+
+  // The fixtures contain no chargingInstantaneousPower, so this test builds its own answer.
+  it('gives no unit to the charging power, whose unit differs by model', async () => {
+    useClock();
+    const adapter = setup({
+      '/cars/VIN1/battery-status?': { data: { attributes: { batteryLevel: 50, chargingInstantaneousPower: 3100 } } },
+    });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    const common = adapter.objects.get('renault.0.VIN1.battery-status.chargingInstantaneousPower')?.common;
+    expect(common).to.include({ type: 'number', role: 'value' });
+    expect(common.unit).to.equal(undefined);
+  });
+});

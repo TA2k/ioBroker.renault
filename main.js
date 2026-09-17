@@ -58,6 +58,36 @@ const QUOTA_PER_HOUR = 60;
 
 /** @typedef {{ path: string, url: string, desc: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
 
+/** Units of known vehicle data keys; json2iob matches them by the last id segment. */
+const DATA_UNITS = {
+  batteryLevel: '%',
+  batteryAutonomy: 'km',
+  batteryAvailableEnergy: 'kWh',
+  batteryTemperature: '°C',
+  chargingRemainingTime: 'min',
+  totalMileage: 'km',
+  fuelAutonomy: 'km',
+  fuelQuantity: 'l',
+  externalTemperature: '°C',
+  internalTemperature: '°C',
+  socThreshold: '%',
+  chargeStartBatteryLevel: '%',
+  chargeEndBatteryLevel: '%',
+  chargeBatteryLevelRecovered: '%',
+};
+
+/** Roles of known vehicle data keys; everything else keeps the role json2iob derives from the type. */
+const DATA_ROLES = {
+  batteryLevel: 'value.battery',
+  batteryAutonomy: 'value.distance',
+  totalMileage: 'value.distance',
+  fuelAutonomy: 'value.distance',
+  fuelQuantity: 'value.fill',
+  batteryTemperature: 'value.temperature',
+  externalTemperature: 'value.temperature',
+  internalTemperature: 'value.temperature',
+};
+
 const KCA = 'kca/car-adapter/v1/cars/';
 const KCM = 'kcm/v1/vehicles/';
 
@@ -505,7 +535,7 @@ class Renault extends utils.Adapter {
             });
           }
           delete device.mileage;
-          await this.json2iob.parse(device.vin + '.general', device, { channelName: 'Vehicle details' });
+          await this.json2iob.parse(device.vin + '.general', device, { channelName: 'Vehicle details', write: false });
         }
         this.deviceArray = vins;
         return true;
@@ -897,7 +927,13 @@ class Renault extends utils.Adapter {
         data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
       }
     }
-    await this.json2iob.parse(vin + '.' + element.path, data, { forceIndex, channelName: element.desc });
+    await this.json2iob.parse(vin + '.' + element.path, data, {
+      forceIndex,
+      channelName: element.desc,
+      units: DATA_UNITS,
+      roles: DATA_ROLES,
+      write: false,
+    });
     return 'ok';
   }
 

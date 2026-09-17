@@ -170,4 +170,23 @@ function createTestAdapter(routes = {}) {
   return adapter;
 }
 
-module.exports = { FakeAdapter, createTestAdapter, httpError, ACCOUNT, VEHICLE };
+/** Routes that answer every polled endpoint with a real answer copied from renault-api. */
+function fixtureRoutes() {
+  const fixture = (name) => require('./fixtures/renault-api/' + name);
+  return {
+    '/battery-status?': fixture('battery-status.renault_5.json'),
+    '/battery-inhibition-status?': {},
+    '/cockpit?': fixture('cockpit.captur_ii.json'),
+    '/charge-mode?': fixture('charge-mode.json'),
+    '/hvac-status?': fixture('hvac-status.renault_5.json'),
+    '/hvac-settings?': fixture('hvac-settings.json'),
+    '/charging-settings?': fixture('charging-settings.single.json'),
+    '/lock-status?': fixture('lock-status.1.json'),
+    '/res-state?': fixture('res-state.1.json'),
+    '/location?': fixture('location.1.json'),
+    '/charge-history?': fixture('charge-history.day.json'),
+    '/charges?': fixture('charges.json'),
+  };
+}
+
+module.exports = { FakeAdapter, createTestAdapter, fixtureRoutes, httpError, ACCOUNT, VEHICLE };

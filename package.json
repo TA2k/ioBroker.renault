@@ -62,6 +62,7 @@
     "test:unit": "mocha test/unit --exit",
     "test": "npm run test:js && npm run test:package",
     "check": "tsc --noEmit -p tsconfig.check.json",
+    "pr:objects": "npx --yes --package @iobroker/repochecker -- node tools/checkObjectStructure.js",
     "lint": "eslint .",
     "translate": "translate-adapter",
     "release": "release-script --all"
