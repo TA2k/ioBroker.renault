@@ -66,6 +66,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) the refresh button, and `charging` on models that cannot stop charging, are reset to false with ack after they were handled
 - (typhosj) an endpoint that answers with only a message and no data (cockpit v2 on the Zoe phase 2) counts as not supported
 - (typhosj) a server error (5xx) is logged as warning once per endpoint and vehicle, with the endpoint name; repeats go to the debug log until the endpoint answers again
 - (typhosj) breaking: `actions/hvac-start` is renamed to `hvac-start`, and `actions/charging-start`, `charge/pause-resume` and `charge/start` are replaced by one state `charging`; the old states are removed, scripts and visualizations need the new names

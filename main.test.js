@@ -140,6 +140,39 @@ describe('token refresh', () => {
 });
 
 describe('refresh command', () => {
+  const press = async (adapter) => {
+    await adapter.setState('renault.0.VIN1.remote.refresh', true, false);
+    await adapter.onStateChange('renault.0.VIN1.remote.refresh', userWrite(true));
+  };
+
+  it('resets the button to false with ack after the poll', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    await press(adapter);
+    expect(urls(adapter).some((url) => url.includes('/battery-status'))).to.equal(true);
+    expect(adapter.states['VIN1.remote.refresh']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refresh']).to.equal(true);
+  });
+
+  it('resets the button also when the poll is skipped because one runs', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.polling = true;
+    await press(adapter);
+    expect(adapter.states['VIN1.remote.refresh']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refresh']).to.equal(true);
+  });
+
+  it('resets the button also when the poll fails', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.updateDevices = () => Promise.reject(new Error('boom'));
+    await press(adapter).catch(() => {});
+    expect(adapter.states['VIN1.remote.refresh']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refresh']).to.equal(true);
+  });
+
   it('does not throw before an account is known', async () => {
     const adapter = setup();
     await adapter.onStateChange('renault.0.VIN1.remote.refresh', userWrite(true));
@@ -1041,7 +1074,8 @@ describe('commands', () => {
         .to.include(url)
         .and.to.match(/country=de$/);
       expect(posts(adapter)[0].data).to.deep.equal({ data: body });
-      expect(adapter.states['VIN1.remote.' + path]).to.equal(val);
+      // a start button (the model cannot stop) is reset to false, a switch keeps the value
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(code === 'XCB1VE' ? false : val);
       expect(adapter.acks['VIN1.remote.' + path]).to.equal(true);
       expect(adapter.states['VIN1.remote.lastError']).to.equal('');
       expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
@@ -1449,6 +1483,7 @@ describe('charging on schedule-based vehicles', () => {
       ],
     });
     expect(adapter.acks['VIN1.remote.charging']).to.equal(true);
+    expect(adapter.states['VIN1.remote.charging']).to.equal(false);
   });
 
   it('does not change the settings it read', async () => {

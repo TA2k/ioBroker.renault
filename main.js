@@ -1281,7 +1281,14 @@ class Renault extends utils.Adapter {
     }
     if (path === 'refresh') {
       this.log.info('Force refresh');
-      await this.pollNow();
+      try {
+        await this.pollNow();
+      } catch (error) {
+        this.log.error('Refresh failed: ' + error);
+      } finally {
+        // a button is confirmed by resetting it
+        await this.setState(id, false, true);
+      }
       return;
     }
     if (!Object.hasOwn(REMOTE_COMMANDS, path)) {
@@ -1300,8 +1307,10 @@ class Renault extends utils.Adapter {
       await this.reportCommandError(vin, path + ' cannot ' + (on ? 'start' : 'stop') + ' on this model. Nothing sent');
       return;
     }
+    // A model that cannot stop gets a start button, which is confirmed by resetting it.
+    const confirm = this.endpointMode(vin, command.stop) === null ? false : on;
     if (request === 'settings') {
-      await this.startChargingViaSettings(id, vin);
+      await this.startChargingViaSettings(id, vin, confirm);
       return;
     }
     const body = request.body;
@@ -1316,7 +1325,7 @@ class Renault extends utils.Adapter {
       }
       body.attributes = { ...body.attributes, targetTemperature: temperature };
     }
-    await this.sendCommand(id, vin, path, this.kamereonUrl(request.base, vin, request.endpoint), { data: body }, on);
+    await this.sendCommand(id, vin, path, this.kamereonUrl(request.base, vin, request.endpoint), { data: body }, confirm);
   }
 
   /**
@@ -1325,8 +1334,9 @@ class Renault extends utils.Adapter {
    *
    * @param {string} id
    * @param {string} vin
+   * @param {ioBroker.StateValue} confirm value written with ack after the cloud accepted
    */
-  async startChargingViaSettings(id, vin) {
+  async startChargingViaSettings(id, vin, confirm) {
     const url = this.kamereonUrl(KCM, vin, 'ev/settings');
     let settings;
     try {
@@ -1340,7 +1350,7 @@ class Renault extends utils.Adapter {
       return;
     }
     const body = { ...settings, programs: settings.programs.map((program) => ({ ...program, programActivationStatus: false })) };
-    await this.sendCommand(id, vin, 'charging', url, body, true);
+    await this.sendCommand(id, vin, 'charging', url, body, confirm);
   }
 
   /**
