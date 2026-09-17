@@ -692,3 +692,81 @@ describe('request budget', () => {
     expect(budget(adapter)).to.deep.equal([]);
   });
 });
+
+describe('ignored endpoints', () => {
+  const lock = (adapter) => urls(adapter).filter((url) => url.includes('/lock-status'));
+  const ignored = (adapter) => logged(adapter.log.info).filter((line) => line.includes('Ignore lock-status'));
+
+  it('skips a rejected endpoint for 24 hours and asks again after that', async () => {
+    const now = useClock();
+    const adapter = setup({ '/lock-status': httpError(403) });
+    await adapter.onReady();
+    now.tick(DAY - 1);
+    await adapter.updateDevices();
+    expect(lock(adapter)).to.have.length(1);
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(lock(adapter)).to.have.length(2);
+  });
+
+  it('waits another 24 hours after a failed retry and logs the ignore only once', async () => {
+    const now = useClock();
+    const adapter = setup({ '/lock-status': httpError(404) });
+    await adapter.onReady();
+    now.tick(DAY);
+    await adapter.updateDevices();
+    now.tick(DAY - 1);
+    await adapter.updateDevices();
+    expect(lock(adapter)).to.have.length(2);
+    expect(ignored(adapter)).to.have.length(1);
+  });
+
+  it('polls the endpoint normally after a successful retry', async () => {
+    const now = useClock();
+    let rejected = true;
+    const adapter = setup({ '/lock-status': () => (rejected ? httpError(403) : {}) });
+    await adapter.onReady();
+    rejected = false;
+    now.tick(DAY);
+    await adapter.updateDevices();
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(lock(adapter)).to.have.length(3);
+  });
+
+  it('does not ignore an endpoint that answered before, even on a later 403', async () => {
+    useClock();
+    let rejected = false;
+    const adapter = setup({ '/lock-status': () => (rejected ? httpError(403) : {}) });
+    await adapter.onReady();
+    rejected = true;
+    await adapter.updateDevices();
+    await adapter.updateDevices();
+    expect(lock(adapter)).to.have.length(3);
+    expect(ignored(adapter)).to.deep.equal([]);
+  });
+
+  it('ignores a rejected endpoint of a vehicle that appears later', async () => {
+    useClock();
+    const adapter = setup({ '/cars/VIN2/lock-status': httpError(404) });
+    await adapter.onReady();
+    adapter.requestClient = setup({
+      '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] },
+      '/cars/VIN2/lock-status': httpError(404),
+    }).requestClient;
+    await adapter.getDeviceList();
+    await adapter.updateDevices();
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes('/cars/VIN2/lock-status'))).to.have.length(1);
+  });
+
+  it('keeps the ignore timing when the vehicle list is loaded again', async () => {
+    const now = useClock();
+    const adapter = setup({ '/lock-status': httpError(403) });
+    await adapter.onReady();
+    await adapter.getDeviceList();
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(lock(adapter)).to.have.length(1);
+  });
+});

@@ -52,6 +52,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) an endpoint the car rejected is asked again once a day, so a temporary 403 no longer disables it until restart
 - (typhosj) the charge history is fetched once per hour instead of on every poll, and the adapter warns once when its requests exceed Renault's quota of about 60 per hour
 - (typhosj) an expired token during a poll stops the poll, refreshes the token once and repeats the poll once
 - (typhosj) after a failed token refresh the adapter logs in again with growing delay and restarts polling once, instead of trying a single time

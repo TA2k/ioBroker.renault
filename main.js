@@ -52,6 +52,7 @@ const KAMEREON_KEY = /^[A-Za-z0-9]{20,64}$/;
 const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
 const QUOTA_PAUSE_MINUTES = [15, 30, 60];
 const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 // Home Assistant limits its Renault integration to 60 requests per hour for the same reason.
 const QUOTA_PER_HOUR = 60;
 
@@ -71,8 +72,10 @@ class Renault extends utils.Adapter {
     this.on('unload', this.onUnload.bind(this));
     this.deviceArray = [];
     this.json2iob = new Json2iob(this);
+    /** @type {Record<string, Record<string, number>>} vin -> endpoint path -> time it was rejected */
     this.ignoreState = {};
-    this.firstUpdate = true;
+    /** @type {Record<string, Set<string>>} vin -> endpoint paths that answered 2xx in this run */
+    this.answered = {};
     // Without a timeout a request the cloud never answers stalls every later poll.
     this.requestClient = axios.create({ timeout: 30 * 1000 });
     this.userAgent = 'okhttp/5.3.0';
@@ -422,7 +425,8 @@ class Renault extends utils.Adapter {
             name += device.vehicleDetails.model.label;
           }
 
-          this.ignoreState[device.vin] = [];
+          this.ignoreState[device.vin] ??= {};
+          this.answered[device.vin] ??= new Set();
           await this.setObjectNotExistsAsync(device.vin, {
             type: 'device',
             common: {
@@ -696,7 +700,6 @@ class Renault extends utils.Adapter {
       }
     }
     this.quotaStrikes = 0;
-    this.firstUpdate = false;
     if (hourlyDue) {
       this.lastHourlyPoll = now;
     }
@@ -729,7 +732,8 @@ class Renault extends utils.Adapter {
     if (element.hourly && !hourlyDue) {
       return false;
     }
-    return !this.ignoreState[vin]?.includes(element.path);
+    const since = this.ignoreState[vin]?.[element.path];
+    return since === undefined || now - since >= DAY_MS;
   }
 
   /**
@@ -777,6 +781,11 @@ class Renault extends utils.Adapter {
     } catch (error) {
       return this.handlePollError(vin, element, error);
     }
+    (this.answered[vin] ??= new Set()).add(element.path);
+    if (this.ignoreState[vin]?.[element.path] !== undefined) {
+      delete this.ignoreState[vin][element.path];
+      this.log.info(element.path + ' answers again for ' + vin + ', polling it again');
+    }
     this.log.debug(JSON.stringify(res.data));
     if (!res.data) {
       return 'ok';
@@ -818,12 +827,12 @@ class Renault extends utils.Adapter {
       this.log.debug(element.path + ' for ' + vin + ' answered 401');
       return 'unauthorized';
     }
-    if (this.firstUpdate && (status === 400 || status === 403 || status === 404)) {
-      if (!this.ignoreState[vin]) {
-        this.ignoreState[vin] = [];
+    if ((status === 400 || status === 403 || status === 404) && !this.answered[vin]?.has(element.path)) {
+      const ignore = (this.ignoreState[vin] ??= {});
+      if (ignore[element.path] === undefined) {
+        this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for 24 hours.');
       }
-      this.ignoreState[vin].push(element.path);
-      this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for updates.');
+      ignore[element.path] = Date.now();
       this.log.debug(String(error));
       this.log.debug(JSON.stringify(error.response.data));
       return 'failed';
