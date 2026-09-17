@@ -56,7 +56,7 @@ const DAY_MS = 24 * HOUR_MS;
 // Home Assistant limits its Renault integration to 60 requests per hour for the same reason.
 const QUOTA_PER_HOUR = 60;
 
-/** @typedef {{ path: string, url: string, desc: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
+/** @typedef {{ path: string, url: string, desc: string, channel?: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
 
 /** Units of known vehicle data keys; json2iob matches them by the last id segment. */
 const DATA_UNITS = {
@@ -205,6 +205,8 @@ class Renault extends utils.Adapter {
     this.ignoreState = {};
     /** @type {Record<string, Set<string>>} vin -> endpoint paths that answered 2xx in this run */
     this.answered = {};
+    /** @type {Record<string, Set<string>>} vin -> endpoint paths whose last answer was a server error */
+    this.serverErrors = {};
     /** @type {Record<string, string | undefined>} vin -> model code, e.g. X102VE */
     this.modelCodes = {};
     // Without a timeout a request the cloud never answers stalls every later poll.
@@ -636,6 +638,10 @@ class Renault extends utils.Adapter {
             ...Object.entries(LEGACY_REMOTE_IDS).map(([legacy, replacement]) => ({ id: legacy, note: 'use ' + replacement })),
             ...unsupported.map((id) => ({ id, note: 'the model does not support it' })),
           ];
+          if (await this.getObjectAsync(device.vin + '.cockpitv2')) {
+            await this.delObjectAsync(device.vin + '.cockpitv2', { recursive: true });
+            this.log.info('Removed ' + device.vin + '.cockpitv2, the data of both cockpit versions is now in ' + device.vin + '.cockpit');
+          }
           for (const { id, note } of removed) {
             const objectId = device.vin + '.remote.' + id;
             if (await this.getObjectAsync(objectId)) {
@@ -735,6 +741,18 @@ class Renault extends utils.Adapter {
           this.country,
         desc: 'Battery inhibition status of the car',
       },
+      // Both cockpit versions write to <vin>.cockpit. v2 comes first; v1 is asked only when v2 is
+      // not supported (isPolled), so the channel never mixes the answers of both.
+      {
+        path: 'cockpitv2',
+        channel: 'cockpit',
+        url:
+          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+          this.account.accountId +
+          '/kamereon/kca/car-adapter/v2/cars/$vin/cockpit?country=' +
+          this.country,
+        desc: 'Status of the car',
+      },
       {
         path: 'cockpit',
         url:
@@ -743,15 +761,6 @@ class Renault extends utils.Adapter {
           '/kamereon/kca/car-adapter/v1/cars/$vin/cockpit?country=' +
           this.country,
         desc: 'Status of the car',
-      },
-      {
-        path: 'cockpitv2',
-        url:
-          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
-          this.account.accountId +
-          '/kamereon/kca/car-adapter/v2/cars/$vin/cockpit?country=' +
-          this.country,
-        desc: 'Statusv2 of the car',
       },
       {
         path: 'charge-mode',
@@ -926,9 +935,8 @@ class Renault extends utils.Adapter {
   }
 
   /**
-   * Once per vehicle, keep the cockpit version that answers and delete the channel of the other.
-   * v2 wins when both answer. v1 is kept only after v2 was rejected as unsupported, and nothing is
-   * decided while neither answered, so a 401, 429 or 5xx never deletes a channel.
+   * Once per vehicle, keep the cockpit version that answers. v2 wins; v1 is kept only after v2 was
+   * rejected as unsupported, so a 401, 429 or 5xx decides nothing.
    */
   async chooseCockpit() {
     let changed = false;
@@ -939,9 +947,7 @@ class Renault extends utils.Adapter {
         delete this.cockpitChoice[vin];
         changed = true;
         this.log.info('Vehicle ' + vin + ' gets no data from ' + chosen + ', trying the other cockpit version again');
-        continue;
-      }
-      if (chosen) {
+      } else if (chosen) {
         continue;
       }
       const answered = this.answered[vin] ?? new Set();
@@ -954,13 +960,9 @@ class Renault extends utils.Adapter {
       } else {
         continue;
       }
-      const drop = keep === 'cockpitv2' ? 'cockpit' : 'cockpitv2';
-      await this.delObjectAsync(vin + '.' + drop, { recursive: true }).catch((error) =>
-        this.log.debug('Removing ' + vin + '.' + drop + ' failed: ' + error),
-      );
       this.cockpitChoice[vin] = keep;
       changed = true;
-      this.log.info('Vehicle ' + vin + ' uses ' + keep + ', removed the unused channel ' + drop);
+      this.log.info('Vehicle ' + vin + ' uses cockpit ' + (keep === 'cockpitv2' ? 'v2' : 'v1'));
     }
     if (changed) {
       await this.setState('info.cockpitVersion', JSON.stringify(this.cockpitChoice), true);
@@ -987,7 +989,13 @@ class Renault extends utils.Adapter {
       return false;
     }
     const cockpit = this.cockpitChoice[vin];
-    return !(cockpit && (element.path === 'cockpit' || element.path === 'cockpitv2') && element.path !== cockpit);
+    if (element.path === 'cockpitv2') {
+      return cockpit !== 'cockpit';
+    }
+    if (element.path === 'cockpit') {
+      return cockpit === 'cockpit' || this.ignoreState[vin]?.cockpitv2 !== undefined;
+    }
+    return true;
   }
 
   /**
@@ -1048,6 +1056,9 @@ class Renault extends utils.Adapter {
     } catch (error) {
       return this.handlePollError(vin, element, error);
     }
+    if (this.serverErrors[vin]?.delete(element.path)) {
+      this.log.info(element.path + ' of ' + vin + ' answers again');
+    }
     if (isPlaceholder(res.data)) {
       // The gateway answers 200 with only a message for endpoints the car does not have
       // (cockpit v2 on the Zoe phase 2: "you should not be there but well done for the effort").
@@ -1082,7 +1093,7 @@ class Renault extends utils.Adapter {
         data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
       }
     }
-    await this.json2iob.parse(vin + '.' + element.path, data, {
+    await this.json2iob.parse(vin + '.' + (element.channel ?? element.path), data, {
       forceIndex,
       channelName: element.desc,
       units: DATA_UNITS,
@@ -1114,7 +1125,14 @@ class Renault extends utils.Adapter {
       return 'failed';
     }
     if (status >= 500) {
-      this.log.warn(`Renault Server error: ${status} `);
+      const message = 'Renault server error ' + status + ' for ' + element.path + ' of ' + vin;
+      const failing = (this.serverErrors[vin] ??= new Set());
+      if (failing.has(element.path)) {
+        this.log.debug(message);
+      } else {
+        failing.add(element.path);
+        this.log.warn(message + '. Repeats are logged at debug level until the endpoint answers again');
+      }
       return 'failed';
     }
     this.log.error('Fetching ' + element.path + ' for ' + vin + ' failed: ' + error);

@@ -153,6 +153,44 @@ describe('refresh command', () => {
   });
 });
 
+describe('server errors', () => {
+  const warnings = (adapter) => logged(adapter.log.warn).filter((line) => line.includes('server error'));
+
+  it('warns once per endpoint and vehicle, names it, and logs repeats at debug level', async () => {
+    const adapter = setup({
+      '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] },
+      '/hvac-settings?': httpError(502),
+      '/location?': httpError(503),
+    });
+    await adapter.onReady();
+    await adapter.updateDevices();
+    await adapter.updateDevices();
+    expect(warnings(adapter)).to.have.length(4);
+    expect(warnings(adapter)[0]).to.include('502').and.to.include('hvac-settings').and.to.include('VIN1');
+    expect(logged(adapter.log.debug).filter((line) => line.includes('server error 502 for hvac-settings'))).to.have.length(4);
+  });
+
+  it('warns again after the endpoint answered in between', async () => {
+    let failing = true;
+    const adapter = setup({ '/hvac-settings?': () => (failing ? httpError(502) : {}) });
+    await adapter.onReady();
+    failing = false;
+    await adapter.updateDevices();
+    expect(logged(adapter.log.info).some((line) => line.includes('hvac-settings of VIN1 answers again'))).to.equal(true);
+    failing = true;
+    await adapter.updateDevices();
+    await adapter.updateDevices();
+    expect(warnings(adapter)).to.have.length(2);
+  });
+
+  it('does not report an endpoint as answering again when it never failed', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    await adapter.updateDevices();
+    expect(logged(adapter.log.info).filter((line) => line.includes('answers again'))).to.deep.equal([]);
+  });
+});
+
 describe('polling errors', () => {
   async function firstPoll(status) {
     const adapter = setup({ '/cars/VIN1/cockpit?': httpError(status) });
@@ -776,38 +814,47 @@ describe('cockpit version', () => {
   const v2 = (adapter) => urls(adapter).filter((url) => url.includes('/v2/cars/VIN1/cockpit?'));
   const cockpitDeletes = (adapter) => adapter.deleted.filter((id) => id.includes('cockpit'));
   const choice = (adapter) => JSON.parse(adapter.states['info.cockpitVersion'] ?? '{}');
+  const written = (adapter, channel) => adapter.json2iob.parse.getCalls().filter((call) => call.args[0] === 'VIN1.' + channel);
 
-  it('keeps v2 when both versions answer and deletes the v1 channel once', async () => {
+  it('asks v2 first, never asks v1 when v2 answers, and writes to the cockpit channel', async () => {
     useClock();
     const adapter = setup();
     await adapter.onReady();
     await adapter.updateDevices();
-    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpit']);
-    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
-    expect(v1(adapter)).to.have.length(1);
+    expect(v1(adapter)).to.deep.equal([]);
     expect(v2(adapter)).to.have.length(2);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
+    expect(written(adapter, 'cockpit')).to.have.length(2);
+    expect(written(adapter, 'cockpit')[0].args[2]).to.include({ channelName: 'Status of the car' });
+    expect(written(adapter, 'cockpitv2')).to.deep.equal([]);
+    expect(cockpitDeletes(adapter)).to.deep.equal([]);
   });
 
-  it('keeps v1 when v2 is not supported and deletes the v2 channel', async () => {
+  it('asks v1 in the same cycle when v2 is not supported and keeps it', async () => {
     useClock();
     const adapter = setup({ '/v2/cars/VIN1/cockpit?': httpError(404) });
     await adapter.onReady();
+    expect(v1(adapter)).to.have.length(1);
     await adapter.updateDevices();
-    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpitv2']);
+    expect(v1(adapter)).to.have.length(2);
+    expect(v2(adapter)).to.have.length(1);
     expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpit' });
+    expect(written(adapter, 'cockpit')).to.have.length(2);
+    expect(cockpitDeletes(adapter)).to.deep.equal([]);
+  });
+
+  it('keeps v1 after the 24-hour ignore of v2 ends', async () => {
+    const now = useClock();
+    const adapter = setup({ '/v2/cars/VIN1/cockpit?': httpError(404) });
+    await adapter.onReady();
+    now.tick(DAY);
+    await adapter.updateDevices();
+    expect(v2(adapter)).to.have.length(1);
     expect(v1(adapter)).to.have.length(2);
   });
 
-  it('keeps v2 when v1 is not supported', async () => {
-    useClock();
-    const adapter = setup({ '/v1/cars/VIN1/cockpit?': httpError(404) });
-    await adapter.onReady();
-    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpit']);
-    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
-  });
-
   for (const status of [401, 429, 503]) {
-    it(`decides nothing and deletes nothing when v2 answers ${status}`, async () => {
+    it(`asks no v1, decides nothing and deletes nothing when v2 answers ${status}`, async () => {
       useClock();
       let tokens = 0;
       const adapter = setup({
@@ -816,7 +863,7 @@ describe('cockpit version', () => {
         'accounts.getJWT': () => (tokens++ === 0 ? { id_token: 'ID_TOKEN' } : httpError(500)),
       });
       await adapter.onReady();
-      expect(v1(adapter)).to.have.length(1);
+      expect(v1(adapter)).to.deep.equal([]);
       expect(cockpitDeletes(adapter)).to.deep.equal([]);
       expect(choice(adapter)).to.deep.equal({});
     });
@@ -826,19 +873,26 @@ describe('cockpit version', () => {
     useClock();
     const adapter = setup({ '/cars/VIN1/cockpit?': httpError(404) });
     await adapter.onReady();
-    expect(cockpitDeletes(adapter)).to.deep.equal([]);
+    expect(v1(adapter)).to.have.length(1);
     expect(choice(adapter)).to.deep.equal({});
   });
 
-  it('uses the stored choice after a restart without asking v1 again', async () => {
-    useClock();
-    const adapter = setup();
-    adapter.states['info.cockpitVersion'] = JSON.stringify({ VIN1: 'cockpitv2' });
-    await adapter.onReady();
-    expect(v1(adapter)).to.deep.equal([]);
-    expect(v2(adapter)).to.have.length(1);
-    expect(cockpitDeletes(adapter)).to.deep.equal([]);
-  });
+  /** @type {[string, (adapter: any) => string[], (adapter: any) => string[]][]} */
+  const storedChoices = [
+    ['cockpitv2', v2, v1],
+    ['cockpit', v1, v2],
+  ];
+  for (const [stored, asked, skipped] of storedChoices) {
+    it(`uses the stored choice ${stored} after a restart without asking the other version`, async () => {
+      useClock();
+      const adapter = setup();
+      adapter.states['info.cockpitVersion'] = JSON.stringify({ VIN1: stored });
+      await adapter.onReady();
+      expect(asked(adapter)).to.have.length(1);
+      expect(skipped(adapter)).to.deep.equal([]);
+      expect(written(adapter, 'cockpit')).to.have.length(1);
+    });
+  }
 
   for (const stored of ['not json', '[]', 'null', JSON.stringify({ VIN1: 'cockpitv3' })]) {
     it(`ignores the invalid stored value ${stored}`, async () => {
@@ -846,10 +900,23 @@ describe('cockpit version', () => {
       const adapter = setup();
       adapter.states['info.cockpitVersion'] = stored;
       await adapter.onReady();
-      expect(v1(adapter)).to.have.length(1);
+      expect(v1(adapter)).to.deep.equal([]);
       expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
     });
   }
+
+  it('removes the cockpitv2 channel of older versions once and keeps the cockpit channel', async () => {
+    useClock();
+    const adapter = setup();
+    for (const id of ['VIN1.cockpit', 'VIN1.cockpit.totalMileage', 'VIN1.cockpitv2', 'VIN1.cockpitv2.message']) {
+      adapter.objects.set('renault.0.' + id, { _id: 'renault.0.' + id, type: 'state', common: {}, native: {} });
+    }
+    await adapter.onReady();
+    await adapter.getDeviceList();
+    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpitv2']);
+    expect(adapter.objects.has('renault.0.VIN1.cockpitv2.message')).to.equal(false);
+    expect(adapter.objects.has('renault.0.VIN1.cockpit.totalMileage')).to.equal(true);
+  });
 
   it('declares the marker state', () => {
     const object = require('./io-package.json').instanceObjects.find((entry) => entry._id === 'info.cockpitVersion');
@@ -1228,8 +1295,8 @@ describe('vehicle data objects', () => {
     expect(common('battery-status.batteryLevel')).to.include({ type: 'number', role: 'value.battery', unit: '%', write: false });
     expect(common('battery-status.batteryAutonomy')).to.include({ type: 'number', role: 'value.distance', unit: 'km', write: false });
     expect(common('battery-status.chargingRemainingTime')).to.include({ type: 'number', unit: 'min' });
-    expect(common('cockpitv2.totalMileage')).to.include({ type: 'number', role: 'value.distance', unit: 'km' });
-    expect(common('cockpitv2.fuelQuantity')).to.include({ type: 'number', role: 'value.fill', unit: 'l' });
+    expect(common('cockpit.totalMileage')).to.include({ type: 'number', role: 'value.distance', unit: 'km' });
+    expect(common('cockpit.fuelQuantity')).to.include({ type: 'number', role: 'value.fill', unit: 'l' });
     // json2iob with forceIndex names array entries <key>01, <key>02, … (checked with json2iob 2.6.25)
     expect(common('charges.charges01.chargeStartBatteryLevel')).to.include({ type: 'number', unit: '%' });
   });
@@ -1420,7 +1487,8 @@ describe('answers without data', () => {
     await adapter.onReady();
     await adapter.updateDevices();
     expect(parsed(adapter, 'cockpitv2')).to.deep.equal([]);
-    expect(adapter.deleted.filter((id) => id.includes('cockpit'))).to.deep.equal(['VIN1.cockpitv2']);
+    expect(parsed(adapter, 'cockpit')).to.have.length(2);
+    expect(adapter.deleted.filter((id) => id.includes('cockpit'))).to.deep.equal([]);
     expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpit' });
     expect(v1(adapter)).to.have.length(2);
     expect(v2(adapter)).to.have.length(1);
@@ -1432,12 +1500,11 @@ describe('answers without data', () => {
     const adapter = setup({ '/v2/cars/VIN1/cockpit?': PLACEHOLDER });
     adapter.states['info.cockpitVersion'] = JSON.stringify({ VIN1: 'cockpitv2' });
     await adapter.onReady();
-    expect(v1(adapter)).to.deep.equal([]);
-    expect(choice(adapter)).to.deep.equal({});
-    await adapter.updateDevices();
     expect(v1(adapter)).to.have.length(1);
     expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpit' });
-    expect(adapter.deleted.filter((id) => id.includes('cockpit'))).to.deep.equal(['VIN1.cockpitv2']);
+    await adapter.updateDevices();
+    expect(v1(adapter)).to.have.length(2);
+    expect(v2(adapter)).to.have.length(1);
   });
 
   it('ignores any endpoint that answers with a message only for 24 hours', async () => {

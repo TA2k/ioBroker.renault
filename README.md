@@ -66,7 +66,8 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
-- (typhosj) an endpoint that answers with only a message and no data (cockpit v2 on the Zoe phase 2) counts as not supported, so the cockpit channel with data is kept
+- (typhosj) an endpoint that answers with only a message and no data (cockpit v2 on the Zoe phase 2) counts as not supported
+- (typhosj) a server error (5xx) is logged as warning once per endpoint and vehicle, with the endpoint name; repeats go to the debug log until the endpoint answers again
 - (typhosj) breaking: `actions/hvac-start` is renamed to `hvac-start`, and `actions/charging-start`, `charge/pause-resume` and `charge/start` are replaced by one state `charging`; the old states are removed, scripts and visualizations need the new names
 - (typhosj) commands and polled data follow the endpoint table of renault-api per model: `charging` and the climate control stop send the request the model needs, and commands or data the model does not offer are not created or polled
 - (typhosj) `charging` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs
@@ -74,7 +75,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 - (typhosj) breaking: the command states use the roles switch, button.start and level.temperature instead of button and value
 - (typhosj) commands are confirmed with ack after the cloud accepted them, and errors are written to remote.lastError
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
-- (typhosj) breaking: only one cockpit version is polled per vehicle (v2 if it answers); the channel of the other version (cockpit or cockpitv2) is deleted once
+- (typhosj) breaking: only one cockpit version is polled per vehicle (v2 if it answers, else v1), and its data is always written to `<vin>.cockpit`; the `cockpitv2` channel is removed once
 - (typhosj) an endpoint the car rejected is asked again once a day, so a temporary 403 no longer disables it until restart
 - (typhosj) the charge history is fetched once per hour instead of on every poll, and the adapter warns once when its requests exceed Renault's quota of about 60 per hour
 - (typhosj) an expired token during a poll stops the poll, refreshes the token once and repeats the poll once
