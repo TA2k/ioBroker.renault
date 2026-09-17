@@ -614,3 +614,81 @@ describe('expired token during a poll', () => {
     expect(adapter.timeouts.filter((timer) => timer.ms === 60 * 1000)).to.deep.equal([]);
   });
 });
+
+describe('request budget', () => {
+  const history = (adapter) => urls(adapter).filter((url) => url.includes('/charge-history') || url.includes('/charges?'));
+  const budget = (adapter) => logged(adapter.log.warn).filter((line) => line.includes('requests per hour'));
+
+  it('fetches the charge history at most once per hour', async () => {
+    const now = useClock();
+    const adapter = setup();
+    await adapter.onReady();
+    expect(history(adapter)).to.have.length(2);
+    now.tick(HOUR - 1);
+    await adapter.updateDevices();
+    expect(history(adapter)).to.have.length(2);
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(history(adapter)).to.have.length(4);
+  });
+
+  it('fetches the history in the next cycle when a cycle was aborted', async () => {
+    const now = useClock();
+    let overloaded = true;
+    const adapter = setup({ '/battery-status': () => (overloaded ? httpError(429) : {}) });
+    await adapter.onReady();
+    expect(history(adapter)).to.have.length(0);
+    overloaded = false;
+    now.tick(15 * 60 * 1000);
+    await adapter.updateDevices();
+    expect(history(adapter)).to.have.length(2);
+  });
+
+  it('never fetches the history when charge fetching is disabled', async () => {
+    useClock();
+    const adapter = setup();
+    adapter.config.disableChargeFetching = true;
+    await adapter.onReady();
+    expect(history(adapter)).to.have.length(0);
+  });
+
+  for (const [pollRequests, hourlyRequests, warns] of [
+    [10, 0, false],
+    [10, 1, true],
+    [0, 60, false],
+    [0, 61, true],
+  ]) {
+    it(`${warns ? 'warns' : 'does not warn'} at ${pollRequests} requests per poll and ${hourlyRequests} per hour (interval 10)`, () => {
+      const adapter = setup();
+      adapter.config.interval = 10;
+      adapter.checkRequestBudget(Number(pollRequests), Number(hourlyRequests));
+      expect(budget(adapter)).to.have.length(warns ? 1 : 0);
+    });
+  }
+
+  it('recommends an interval that fits the quota', () => {
+    const adapter = setup();
+    adapter.config.interval = 10;
+    adapter.checkRequestBudget(10, 1);
+    expect(budget(adapter)[0]).to.include('at least 11 minutes');
+  });
+
+  it('checks the budget once, after the first cycle, with the endpoints that stay polled', async () => {
+    useClock();
+    const adapter = setup({ '/lock-status': httpError(404) });
+    adapter.config.interval = 5;
+    const check = sinon.spy(adapter, 'checkRequestBudget');
+    await adapter.onReady();
+    await adapter.updateDevices();
+    // 11 non-history endpoints minus the ignored lock-status, plus the two hourly history endpoints
+    expect(check.args).to.deep.equal([[10, 2]]);
+    expect(budget(adapter)).to.have.length(1);
+  });
+
+  it('does not warn at the default interval of 15 minutes', async () => {
+    useClock();
+    const adapter = setup();
+    await adapter.onReady();
+    expect(budget(adapter)).to.deep.equal([]);
+  });
+});

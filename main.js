@@ -51,8 +51,11 @@ const BUNDLED_KAMEREON_KEY = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
 const KAMEREON_KEY = /^[A-Za-z0-9]{20,64}$/;
 const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
 const QUOTA_PAUSE_MINUTES = [15, 30, 60];
+const HOUR_MS = 60 * 60 * 1000;
+// Home Assistant limits its Renault integration to 60 requests per hour for the same reason.
+const QUOTA_PER_HOUR = 60;
 
-/** @typedef {{ path: string, url: string, desc: string, isHistory?: boolean }} Endpoint */
+/** @typedef {{ path: string, url: string, desc: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
 
 class Renault extends utils.Adapter {
   /**
@@ -89,6 +92,8 @@ class Renault extends utils.Adapter {
     this.locale = 'de-DE';
     this.quotaStrikes = 0;
     this.quotaPausedUntil = 0;
+    this.lastHourlyPoll = -Infinity;
+    this.budgetChecked = false;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -511,10 +516,12 @@ class Renault extends utils.Adapter {
       this.log.error('No accountId found');
       return;
     }
-    if (Date.now() < this.quotaPausedUntil) {
+    const now = Date.now();
+    if (now < this.quotaPausedUntil) {
       this.log.debug('Poll skipped during the request quota pause');
       return;
     }
+    const hourlyDue = now - this.lastHourlyPoll >= HOUR_MS;
     const curDate = new Date().toISOString().split('T')[0];
     // Charge history: limit start date to ~1 year back (My Renault app paginates yearly).
     // Keeping the range bounded prevents the API from returning years of data on every poll.
@@ -638,6 +645,7 @@ class Renault extends utils.Adapter {
           this.country,
         desc: 'Charging history of the car',
         isHistory: true,
+        hourly: true,
       });
       statusArray.push({
         path: 'charges',
@@ -652,6 +660,7 @@ class Renault extends utils.Adapter {
           this.country,
         desc: 'Charges of the car',
         isHistory: true,
+        hourly: true,
       });
     }
 
@@ -665,7 +674,7 @@ class Renault extends utils.Adapter {
     };
     for (const vin of this.deviceArray) {
       for (const element of statusArray) {
-        if (this.ignoreState[vin] && this.ignoreState[vin].includes(element.path)) {
+        if (!this.isPolled(vin, element, now, hourlyDue)) {
           continue;
         }
         const outcome = await this.pollEndpoint(vin, element, headers);
@@ -688,6 +697,65 @@ class Renault extends utils.Adapter {
     }
     this.quotaStrikes = 0;
     this.firstUpdate = false;
+    if (hourlyDue) {
+      this.lastHourlyPoll = now;
+    }
+    if (!this.budgetChecked) {
+      this.budgetChecked = true;
+      let pollRequests = 0;
+      let hourlyRequests = 0;
+      for (const vin of this.deviceArray) {
+        for (const element of statusArray) {
+          if (element.hourly) {
+            hourlyRequests += this.isPolled(vin, element, now, true) ? 1 : 0;
+          } else {
+            pollRequests += this.isPolled(vin, element, now, false) ? 1 : 0;
+          }
+        }
+      }
+      this.checkRequestBudget(pollRequests, hourlyRequests);
+    }
+  }
+
+  /**
+   * Whether a cycle at `now` requests this endpoint for this vehicle.
+   *
+   * @param {string} vin
+   * @param {Endpoint} element
+   * @param {number} now
+   * @param {boolean} hourlyDue
+   */
+  isPolled(vin, element, now, hourlyDue) {
+    if (element.hourly && !hourlyDue) {
+      return false;
+    }
+    return !this.ignoreState[vin]?.includes(element.path);
+  }
+
+  /**
+   * Warn when the planned requests exceed Renault's quota of about 60 per hour.
+   *
+   * @param {number} pollRequests requests per poll
+   * @param {number} hourlyRequests requests per hour that do not depend on the interval
+   */
+  checkRequestBudget(pollRequests, hourlyRequests) {
+    const perHour = (pollRequests * 60) / this.config.interval + hourlyRequests;
+    if (perHour <= QUOTA_PER_HOUR) {
+      return;
+    }
+    const room = QUOTA_PER_HOUR - hourlyRequests;
+    const advice =
+      room > 0
+        ? ' Set the update interval to at least ' + Math.ceil((pollRequests * 60) / room) + ' minutes.'
+        : ' Disable charge fetching or use fewer vehicles.';
+    this.log.warn(
+      'The adapter sends about ' +
+        Math.ceil(perHour) +
+        ' requests per hour, Renault allows about ' +
+        QUOTA_PER_HOUR +
+        ' requests per hour.' +
+        advice,
+    );
   }
 
   /**
