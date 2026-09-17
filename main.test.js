@@ -2,7 +2,7 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { createTestAdapter, httpError, ACCOUNT } = require('./test/fakeAdapter');
+const { createTestAdapter, httpError, ACCOUNT, VEHICLE } = require('./test/fakeAdapter');
 const createRenault = require('./main.js');
 
 const setup = createTestAdapter;
@@ -911,9 +911,22 @@ describe('vehicle list', () => {
   });
 });
 
+/**
+ * Vehicle list with one vehicle of the given renault-api model code.
+ *
+ * @param {string} [code]
+ */
+function vehicleOf(code) {
+  return { vehicleLinks: [{ ...VEHICLE, vehicleDetails: { ...VEHICLE.vehicleDetails, model: { code, label: ' ' + code } } }] };
+}
+
 describe('commands', () => {
-  async function ready(routes = {}) {
-    const adapter = setup(routes);
+  /**
+   * @param {Record<string, unknown>} [routes]
+   * @param {string} [code] model code of VIN1
+   */
+  async function ready(routes = {}, code = undefined) {
+    const adapter = setup(code ? { '/vehicles?': vehicleOf(code), ...routes } : routes);
     await adapter.onReady();
     adapter.requestClient.resetHistory();
     return adapter;
@@ -930,48 +943,31 @@ describe('commands', () => {
     await adapter.onStateChange(id, userWrite(val));
   };
 
+  const KCA_HVAC = '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/hvac-start?';
+  const KCA_CHARGE = '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charging-start?';
+  const KCM_PAUSE = '/kamereon/kcm/v1/vehicles/VIN1/charge/pause-resume?';
+  /** @type {[string | undefined, string, boolean, string, object][]} model code (undefined = not documented), state, value, url, body */
   const cases = [
+    [undefined, 'hvac-start', true, KCA_HVAC, { type: 'HvacStart', attributes: { action: 'start', targetTemperature: 21 } }],
+    [undefined, 'hvac-start', false, KCA_HVAC, { type: 'HvacStart', attributes: { action: 'cancel' } }],
+    ['XBG1VE', 'hvac-start', false, KCA_HVAC, { type: 'HvacStart', attributes: { action: 'stop' } }],
+    [undefined, 'charging', true, KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'start' } }],
+    [undefined, 'charging', false, KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'stop' } }],
+    ['X102VE', 'charging', true, KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'start' } }],
+    ['X102VE', 'charging', false, KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'pause' } }],
+    ['XBG1VE', 'charging', true, KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'resume' } }],
+    ['XBG1VE', 'charging', false, KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'pause' } }],
     [
-      'hvac-start',
+      'XCB1VE',
+      'charging',
       true,
-      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/hvac-start?',
-      { type: 'HvacStart', attributes: { action: 'start', targetTemperature: 21 } },
-    ],
-    [
-      'hvac-start',
-      false,
-      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/hvac-start?',
-      { type: 'HvacStart', attributes: { action: 'cancel' } },
-    ],
-    [
-      'charging-start',
-      true,
-      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charging-start?',
+      '/kamereon/kcm/v1/vehicles/VIN1/charge/start?',
       { type: 'ChargingStart', attributes: { action: 'start' } },
     ],
-    [
-      'charging-start',
-      false,
-      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charging-start?',
-      { type: 'ChargingStart', attributes: { action: 'stop' } },
-    ],
-    [
-      'charge-pause-resume',
-      true,
-      '/kamereon/kcm/v1/vehicles/VIN1/charge/pause-resume?',
-      { type: 'ChargePauseResume', attributes: { action: 'resume' } },
-    ],
-    [
-      'charge-pause-resume',
-      false,
-      '/kamereon/kcm/v1/vehicles/VIN1/charge/pause-resume?',
-      { type: 'ChargePauseResume', attributes: { action: 'pause' } },
-    ],
-    ['charge-start', true, '/kamereon/kcm/v1/vehicles/VIN1/charge/start?', { type: 'ChargingStart', attributes: { action: 'start' } }],
   ];
-  for (const [path, val, url, body] of cases) {
-    it(`sends ${path} = ${val} and confirms it`, async () => {
-      const adapter = await ready();
+  for (const [code, path, val, url, body] of cases) {
+    it(`sends ${path} = ${val} for model ${code ?? 'unknown'} and confirms it`, async () => {
+      const adapter = await ready({}, code);
       await write(adapter, path, val);
       expect(posts(adapter)).to.have.length(1);
       expect(posts(adapter)[0].url)
@@ -985,17 +981,28 @@ describe('commands', () => {
     });
   }
 
-  it('sends nothing for charge-start = false', async () => {
-    const adapter = await ready();
-    await write(adapter, 'charge-start', false);
-    expect(posts(adapter)).to.deep.equal([]);
-    expect(adapter.states['VIN1.remote.lastError']).to.include('charge-start');
+  for (const code of ['XCB1VE', 'R5E1VE', 'A5E1AE']) {
+    it(`sends nothing for charging = false on model ${code}, which cannot stop`, async () => {
+      const adapter = await ready({}, code);
+      await write(adapter, 'charging', false);
+      expect(adapter.requestClient.called).to.equal(false);
+      expect(adapter.states['VIN1.remote.lastError']).to.include('charging cannot stop');
+      expect(adapter.acks['VIN1.remote.charging']).to.equal(false);
+    });
+  }
+
+  it('sends nothing for a command the model does not support', async () => {
+    const adapter = await ready({}, 'XJA1VP');
+    await write(adapter, 'charging', true);
+    await write(adapter, 'hvac-start', true);
+    expect(adapter.requestClient.called).to.equal(false);
+    expect(adapter.states['VIN1.remote.lastError']).to.include('cannot start');
   });
 
   for (const val of ['true', 1, null]) {
     it(`rejects the non-boolean command value ${JSON.stringify(val)}`, async () => {
       const adapter = await ready();
-      await write(adapter, 'charging-start', val);
+      await write(adapter, 'charging', val);
       expect(posts(adapter)).to.deep.equal([]);
       expect(adapter.states['VIN1.remote.lastError']).to.include('true or false');
     });
@@ -1004,9 +1011,9 @@ describe('commands', () => {
   it('records a failed command and leaves it unconfirmed', async () => {
     const error = httpError(403, {}, { errors: [{ errorCode: 'err.func.wired.forbidden' }] });
     const adapter = await ready({ '/actions/charging-start': error });
-    await write(adapter, 'charging-start', true);
-    expect(adapter.acks['VIN1.remote.charging-start']).to.equal(false);
-    expect(adapter.states['VIN1.remote.lastError']).to.include('charging-start').and.to.include('err.func.wired.forbidden');
+    await write(adapter, 'charging', true);
+    expect(adapter.acks['VIN1.remote.charging']).to.equal(false);
+    expect(adapter.states['VIN1.remote.lastError']).to.include('charging').and.to.include('err.func.wired.forbidden');
     expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
   });
 
@@ -1051,7 +1058,7 @@ describe('commands', () => {
     'renault.0.VIN1.remote.lastError',
     'renault.0.VIN1.remote.toString',
     'renault.0.VIN1.general.vin',
-    'renault.0.OTHER.remote.charging-start',
+    'renault.0.OTHER.remote.charging',
   ]) {
     it(`sends nothing for a write to ${id}`, async () => {
       const adapter = await ready();
@@ -1063,7 +1070,7 @@ describe('commands', () => {
   it('ignores acknowledged values', async () => {
     const adapter = await ready();
     await adapter.onStateChange(
-      'renault.0.VIN1.remote.charging-start',
+      'renault.0.VIN1.remote.charging',
       /** @type {ioBroker.State} */ (/** @type {unknown} */ ({ val: true, ack: true })),
     );
     expect(posts(adapter)).to.deep.equal([]);
@@ -1076,7 +1083,7 @@ describe('remote objects', () => {
   it('creates the remote states with roles that match their use', async () => {
     const adapter = setup();
     await adapter.onReady();
-    for (const id of ['hvac-start', 'charging-start', 'charge-pause-resume']) {
+    for (const id of ['hvac-start', 'charging']) {
       expect(common(adapter, id)).to.include({ type: 'boolean', role: 'switch', read: true, write: true });
     }
     expect(common(adapter, 'hvac-temperature')).to.include({
@@ -1086,7 +1093,6 @@ describe('remote objects', () => {
       read: true,
       write: true,
     });
-    expect(common(adapter, 'charge-start')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
     expect(common(adapter, 'refresh')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
     expect(common(adapter, 'lastError')).to.include({ type: 'string', role: 'text', read: true, write: false });
   });
@@ -1117,11 +1123,42 @@ describe('remote objects', () => {
     await adapter.onReady();
     expect(adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'))).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
     expect([...adapter.objects.keys()].filter((id) => id.includes('/'))).to.deep.equal([]);
-    for (const id of ['hvac-start', 'charging-start', 'charge-pause-resume', 'charge-start']) {
+    for (const id of ['hvac-start', 'charging']) {
       expect(common(adapter, id)).to.not.equal(undefined);
     }
     await adapter.getDeviceList();
     expect(adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'))).to.have.length(legacy.length);
+  });
+
+  it('creates only the commands the model supports, with the role its stop support allows', async () => {
+    const roles = async (code) => {
+      const adapter = setup({ '/vehicles?': vehicleOf(code) });
+      await adapter.onReady();
+      return Object.fromEntries(
+        ['hvac-start', 'hvac-temperature', 'charging'].map((id) => [id, adapter.objects.get('renault.0.VIN1.remote.' + id)?.common.role]),
+      );
+    };
+    expect(await roles('X102VE')).to.deep.equal({ 'hvac-start': 'switch', 'hvac-temperature': 'level.temperature', charging: 'switch' });
+    expect(await roles('R5E1VE')).to.deep.equal({
+      'hvac-start': 'switch',
+      'hvac-temperature': 'level.temperature',
+      charging: 'button.start',
+    });
+    expect(await roles('XJA1VP')).to.deep.equal({ 'hvac-start': undefined, 'hvac-temperature': undefined, charging: undefined });
+  });
+
+  it('removes command states the model does not support', async () => {
+    const adapter = setup({ '/vehicles?': vehicleOf('XJA1VP') });
+    for (const id of ['hvac-start', 'hvac-temperature', 'charging']) {
+      adapter.objects.set('renault.0.VIN1.remote.' + id, { _id: 'renault.0.VIN1.remote.' + id, type: 'state', common: {}, native: {} });
+    }
+    await adapter.onReady();
+    expect(adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'))).to.deep.equal([
+      'VIN1.remote.hvac-start',
+      'VIN1.remote.charging',
+      'VIN1.remote.hvac-temperature',
+    ]);
+    expect(common(adapter, 'refresh')).to.not.equal(undefined);
   });
 
   it('sends nothing for a write to a removed command state', async () => {
@@ -1209,4 +1246,163 @@ describe('vehicle data objects', () => {
     expect(common).to.include({ type: 'number', role: 'value' });
     expect(common.unit).to.equal(undefined);
   });
+});
+
+describe('model endpoint table', () => {
+  const table = require('./lib/vehicleEndpoints.json');
+  const polled = (adapter, path) => urls(adapter).filter((url) => url.includes('/cars/VIN1/' + path + '?'));
+
+  it('skips the data endpoints the model does not support', async () => {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('X102VE') });
+    await adapter.onReady();
+    for (const path of ['lock-status', 'res-state', 'charge-mode']) {
+      expect(polled(adapter, path), path).to.deep.equal([]);
+    }
+    for (const path of ['battery-status', 'hvac-status', 'location', 'charge-history', 'battery-inhibition-status']) {
+      expect(polled(adapter, path), path).to.have.length(1);
+    }
+  });
+
+  it('asks every endpoint of a model renault-api does not document and says so once', async () => {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('ZZ99ZZ') });
+    await adapter.onReady();
+    await adapter.getDeviceList();
+    expect(polled(adapter, 'lock-status')).to.have.length(1);
+    expect(logged(adapter.log.info).filter((line) => line.includes('ZZ99ZZ'))).to.have.length(1);
+  });
+
+  it('counts only the supported endpoints in the request budget', async () => {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('X102VE') });
+    const check = sinon.spy(adapter, 'checkRequestBudget');
+    await adapter.onReady();
+    // 11 non-history endpoints minus lock-status, res-state, charge-mode and cockpit v1
+    expect(check.args).to.deep.equal([[7, 2]]);
+  });
+
+  it('holds only request variants the adapter knows', () => {
+    const known = new Set(['default', 'kcm', 'kcm-pause-resume', 'kcm-settings', 'kca-stop', null]);
+    const unknown = Object.entries(table.models).flatMap(([code, model]) =>
+      Object.entries(model.endpoints)
+        .filter(([, mode]) => !known.has(mode))
+        .map(([key, mode]) => code + ' ' + key + ' ' + mode),
+    );
+    expect(unknown).to.deep.equal([]);
+    expect(table.models.X102VE.endpoints['actions/charge-stop']).to.equal('kcm-pause-resume');
+  });
+
+  it('parses the table of renault-api', () => {
+    const { parseModels } = require('./tools/updateVehicleEndpoints');
+    const source = [
+      '_DEFAULT_ENDPOINTS: dict[str, EndpointDefinition] = {',
+      '    "actions/charge-start": EndpointDefinition(',
+      '        "/kca/car-adapter/v1/cars/{vin}/actions/charging-start"',
+      '    ),',
+      '    "lock-status": EndpointDefinition("/kca/car-adapter/v1/cars/{vin}/lock-status"),',
+      '}',
+      '_KCA_ALTERNATIVE_ENDPOINTS: dict[str, EndpointDefinition] = {',
+      '}',
+      '_KCM_ENDPOINTS: dict[str, EndpointDefinition] = {',
+      '    "actions/charge-stop-via-pause-resume": EndpointDefinition(',
+      '        "/kcm/v1/vehicles/{vin}/charge/pause-resume", mode="kcm-pause-resume"',
+      '    ),',
+      '}',
+      '',
+      '_VEHICLE_ENDPOINTS: dict[str, dict[str, EndpointDefinition | None]] = {',
+      '    "X102VE": {  # ZOE phase 2',
+      '        "actions/charge-start": _DEFAULT_ENDPOINTS["actions/charge-start"],',
+      '        "actions/charge-stop": _KCM_ENDPOINTS[  # Uses KCM pause-resume',
+      '            "actions/charge-stop-via-pause-resume"',
+      '        ],',
+      '        # a comment line',
+      '        "lock-status": None,  # default => 404',
+      '    },',
+      '    "XBG1VE": {',
+      '        "lock-status": None,',
+      '    },',
+      '}',
+      'VEHICLE_SPECIFICATIONS = {',
+      '    "XBG1VE": {  # DACIA SPRING',
+      '        "control-charge-via-kcm": True,',
+      '    },',
+      '}',
+    ].join('\n');
+    expect(parseModels(source)).to.deep.equal({
+      X102VE: {
+        name: 'ZOE phase 2',
+        endpoints: { 'actions/charge-start': 'default', 'actions/charge-stop': 'kcm-pause-resume', 'lock-status': null },
+      },
+      XBG1VE: { name: '', endpoints: { 'lock-status': null } },
+    });
+    expect(() =>
+      parseModels(source.replace('"actions/charge-stop-via-pause-resume": EndpointDefinition', '"other": EndpointDefinition')),
+    ).to.throw('Unknown endpoint definition');
+    expect(() => parseModels('nothing')).to.throw('_DEFAULT_ENDPOINTS not found');
+  });
+});
+
+describe('charging on schedule-based vehicles', () => {
+  const SETTINGS = '/kamereon/kcm/v1/vehicles/VIN1/ev/settings?country=de';
+  const CURRENT = {
+    mode: 'scheduled',
+    programs: [
+      { programId: 1, programActivationStatus: true, programName: 'night' },
+      { programId: 2, programActivationStatus: false },
+    ],
+  };
+  async function ready(get) {
+    const adapter = setup({ '/vehicles?': vehicleOf('R5E1VE'), '/ev/settings': (request) => (request.method === 'post' ? {} : get) });
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+  const calls = (adapter, method) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .filter((request) => (request.method ?? 'get') === method && request.url.includes(SETTINGS));
+  const press = async (adapter) => {
+    const id = 'renault.0.VIN1.remote.charging';
+    await adapter.setState(id, true, false);
+    await adapter.onStateChange(id, userWrite(true));
+  };
+
+  it('posts the settings back with every program switched off', async () => {
+    const adapter = await ready(CURRENT);
+    await press(adapter);
+    expect(calls(adapter, 'get')).to.have.length(1);
+    expect(calls(adapter, 'post')).to.have.length(1);
+    expect(calls(adapter, 'post')[0].data).to.deep.equal({
+      mode: 'scheduled',
+      programs: [
+        { programId: 1, programActivationStatus: false, programName: 'night' },
+        { programId: 2, programActivationStatus: false },
+      ],
+    });
+    expect(adapter.acks['VIN1.remote.charging']).to.equal(true);
+  });
+
+  it('does not change the settings it read', async () => {
+    const current = structuredClone(CURRENT);
+    const adapter = await ready(current);
+    await press(adapter);
+    expect(current).to.deep.equal(CURRENT);
+  });
+
+  for (const [name, answer] of [
+    ['no programs', { mode: 'scheduled' }],
+    ['programs that are no list', { programs: {} }],
+    ['an empty answer', null],
+    ['a failed read', httpError(403)],
+  ]) {
+    it(`sends nothing after ${name}`, async () => {
+      const adapter = await ready(answer);
+      await press(adapter);
+      expect(calls(adapter, 'post')).to.deep.equal([]);
+      expect(adapter.states['VIN1.remote.lastError']).to.include('charging');
+      expect(adapter.acks['VIN1.remote.charging']).to.equal(false);
+    });
+  }
 });

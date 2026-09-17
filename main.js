@@ -91,40 +91,76 @@ const DATA_ROLES = {
 const KCA = 'kca/car-adapter/v1/cars/';
 const KCM = 'kcm/v1/vehicles/';
 
-/** @typedef {{ base: string, endpoint?: string, body: (on: boolean) => { type: string, attributes?: Record<string, unknown> } | null }} RemoteCommand */
+/**
+ * Endpoints per model code from renault-api (tools/updateVehicleEndpoints.js). A table key maps to
+ * the request variant the model needs, or to null when the model does not support it.
+ *
+ * @type {Record<string, { name: string, endpoints: Record<string, string | null> }>}
+ */
+const VEHICLE_ENDPOINTS = require('./lib/vehicleEndpoints.json').models;
+
+/** @typedef {{ base: string, endpoint: string, body: { type: string, attributes: Record<string, unknown> } }} CommandRequest */
+/**
+ * @typedef {object} RemoteCommand
+ * @property {string} name label of the state
+ * @property {string} start table key of the start request
+ * @property {string} stop table key of the stop request
+ * @property {(mode: string, on: boolean) => CommandRequest | 'settings' | null} request null when the
+ *   variant cannot send this value, 'settings' for the ev/settings start of schedule-based vehicles
+ */
 
 /**
- * Boolean remote commands, keyed by the state below <vin>.remote. The bodies follow renault-api;
- * body() returns null when the value has no endpoint. State ids carry no "/", which the object
- * structure check of the repositories bot warns about (W3001).
+ * Boolean remote commands, keyed by the state below <vin>.remote. Endpoints and bodies follow
+ * renault-api (renault_vehicle.py). State ids carry no "/", which the object structure check of
+ * the repositories bot warns about (W3001).
  *
  * @type {Record<string, RemoteCommand>}
  */
 const REMOTE_COMMANDS = {
   'hvac-start': {
-    base: KCA,
-    endpoint: 'actions/hvac-start',
-    body: (on) => ({ type: 'HvacStart', attributes: { action: on ? 'start' : 'cancel' } }),
+    name: 'Climate control',
+    start: 'actions/hvac-start',
+    stop: 'actions/hvac-stop',
+    request: (mode, on) => ({
+      base: KCA,
+      endpoint: 'actions/hvac-start',
+      body: { type: 'HvacStart', attributes: { action: on ? 'start' : mode === 'kca-stop' ? 'stop' : 'cancel' } },
+    }),
   },
-  'charging-start': {
-    base: KCA,
-    endpoint: 'actions/charging-start',
-    body: (on) => ({ type: 'ChargingStart', attributes: { action: on ? 'start' : 'stop' } }),
-  },
-  'charge-pause-resume': {
-    base: KCM,
-    endpoint: 'charge/pause-resume',
-    body: (on) => ({ type: 'ChargePauseResume', attributes: { action: on ? 'resume' : 'pause' } }),
-  },
-  'charge-start': {
-    base: KCM,
-    endpoint: 'charge/start',
-    body: (on) => (on ? { type: 'ChargingStart', attributes: { action: 'start' } } : null),
+  charging: {
+    name: 'Charging',
+    start: 'actions/charge-start',
+    stop: 'actions/charge-stop',
+    request: (mode, on) => {
+      if (mode === 'kcm-settings') {
+        return on ? 'settings' : null;
+      }
+      if (mode === 'kcm') {
+        return on ? { base: KCM, endpoint: 'charge/start', body: { type: 'ChargingStart', attributes: { action: 'start' } } } : null;
+      }
+      if (mode === 'kcm-pause-resume') {
+        return {
+          base: KCM,
+          endpoint: 'charge/pause-resume',
+          body: { type: 'ChargePauseResume', attributes: { action: on ? 'resume' : 'pause' } },
+        };
+      }
+      return {
+        base: KCA,
+        endpoint: 'actions/charging-start',
+        body: { type: 'ChargingStart', attributes: { action: on ? 'start' : 'stop' } },
+      };
+    },
   },
 };
 
-/** Remote state ids of versions before 1.0.0, removed once per vehicle. */
-const LEGACY_REMOTE_IDS = ['actions/hvac-start', 'actions/charging-start', 'charge/pause-resume', 'charge/start'];
+/** Remote state ids of versions before 1.0.0 and the state that replaces them, removed once per vehicle. */
+const LEGACY_REMOTE_IDS = {
+  'actions/hvac-start': 'hvac-start',
+  'actions/charging-start': 'charging',
+  'charge/pause-resume': 'charging',
+  'charge/start': 'charging',
+};
 
 /**
  * No source (renault-api, Home Assistant, ZoePHP) documents a range; like Home Assistant, only a
@@ -154,6 +190,8 @@ class Renault extends utils.Adapter {
     this.ignoreState = {};
     /** @type {Record<string, Set<string>>} vin -> endpoint paths that answered 2xx in this run */
     this.answered = {};
+    /** @type {Record<string, string | undefined>} vin -> model code, e.g. X102VE */
+    this.modelCodes = {};
     // Without a timeout a request the cloud never answers stalls every later poll.
     this.requestClient = axios.create({ timeout: 30 * 1000 });
     this.userAgent = 'okhttp/5.3.0';
@@ -515,6 +553,22 @@ class Renault extends utils.Adapter {
 
           this.ignoreState[device.vin] ??= {};
           this.answered[device.vin] ??= new Set();
+          const modelCode = device.vehicleDetails?.model?.code;
+          this.modelCodes[device.vin] = modelCode;
+          if (!this.deviceArray.includes(device.vin)) {
+            const model = VEHICLE_ENDPOINTS[modelCode ?? ''];
+            if (model) {
+              this.log.debug('Vehicle ' + device.vin + ' is a ' + model.name + ' (' + modelCode + ')');
+            } else {
+              this.log.info(
+                'Vehicle ' +
+                  device.vin +
+                  ' has the model code ' +
+                  modelCode +
+                  ', which renault-api does not document yet. All endpoints are tried',
+              );
+            }
+          }
           await this.setObjectNotExistsAsync(device.vin, {
             type: 'device',
             common: {
@@ -530,20 +584,48 @@ class Renault extends utils.Adapter {
             native: {},
           });
 
-          const remoteObjects = [
-            { id: 'hvac-start', name: 'Climate control: true = start, false = stop', type: 'boolean', role: 'switch' },
-            { id: 'hvac-temperature', name: 'Climate control target temperature', type: 'number', role: 'level.temperature', unit: '°C' },
-            { id: 'charging-start', name: 'Charging: true = start, false = stop', type: 'boolean', role: 'switch' },
-            { id: 'charge-pause-resume', name: 'Charging: true = resume, false = pause', type: 'boolean', role: 'switch' },
-            { id: 'charge-start', name: 'Start charging (KCM vehicles)', type: 'boolean', role: 'button.start', read: false },
+          const remoteObjects = [];
+          /** @type {string[]} */
+          const unsupported = [];
+          for (const [id, command] of Object.entries(REMOTE_COMMANDS)) {
+            if (this.endpointMode(device.vin, command.start) === null) {
+              unsupported.push(id);
+              continue;
+            }
+            const stops = this.endpointMode(device.vin, command.stop) !== null;
+            remoteObjects.push({
+              id,
+              name: command.name + (stops ? ': true = start, false = stop' : ': true = start'),
+              type: 'boolean',
+              role: stops ? 'switch' : 'button.start',
+              read: stops,
+            });
+            if (id === 'hvac-start') {
+              remoteObjects.push({
+                id: 'hvac-temperature',
+                name: 'Climate control target temperature',
+                type: 'number',
+                role: 'level.temperature',
+                unit: '°C',
+              });
+            }
+          }
+          if (unsupported.includes('hvac-start')) {
+            unsupported.push('hvac-temperature');
+          }
+          remoteObjects.push(
             { id: 'refresh', name: 'Refresh vehicle data', type: 'boolean', role: 'button', read: false },
             { id: 'lastError', name: 'Error of the last command, empty after a success', type: 'string', role: 'text', write: false },
+          );
+          const removed = [
+            ...Object.entries(LEGACY_REMOTE_IDS).map(([legacy, replacement]) => ({ id: legacy, note: 'use ' + replacement })),
+            ...unsupported.map((id) => ({ id, note: 'the model does not support it' })),
           ];
-          for (const legacy of LEGACY_REMOTE_IDS) {
-            const legacyId = device.vin + '.remote.' + legacy;
-            if (await this.getObjectAsync(legacyId)) {
-              await this.delObjectAsync(legacyId);
-              this.log.info('Removed ' + legacyId + ', the command is now ' + legacy.replace(/^actions\//, '').replace('/', '-'));
+          for (const { id, note } of removed) {
+            const objectId = device.vin + '.remote.' + id;
+            if (await this.getObjectAsync(objectId)) {
+              await this.delObjectAsync(objectId);
+              this.log.info('Removed ' + objectId + ', ' + note);
             }
           }
           for (const remote of remoteObjects) {
@@ -874,12 +956,28 @@ class Renault extends utils.Adapter {
     if (element.hourly && !hourlyDue) {
       return false;
     }
+    if (this.endpointMode(vin, element.path === 'cockpitv2' ? 'cockpit' : element.path) === null) {
+      return false;
+    }
     const since = this.ignoreState[vin]?.[element.path];
     if (since !== undefined && now - since < DAY_MS) {
       return false;
     }
     const cockpit = this.cockpitChoice[vin];
     return !(cockpit && (element.path === 'cockpit' || element.path === 'cockpitv2') && element.path !== cockpit);
+  }
+
+  /**
+   * Request variant renault-api lists for this vehicle: 'default' for models or table keys it does
+   * not list, null when the model does not support the endpoint.
+   *
+   * @param {string} vin
+   * @param {string} key table key, e.g. 'actions/charge-start' or 'lock-status'
+   * @returns {string | null}
+   */
+  endpointMode(vin, key) {
+    const endpoints = VEHICLE_ENDPOINTS[this.modelCodes[vin] ?? '']?.endpoints;
+    return endpoints && Object.hasOwn(endpoints, key) ? endpoints[key] : 'default';
   }
 
   /**
@@ -1133,13 +1231,20 @@ class Renault extends utils.Adapter {
       await this.reportCommandError(vin, path + ' takes true or false, got ' + JSON.stringify(state.val) + '. Nothing sent');
       return;
     }
+    const on = state.val;
     const command = REMOTE_COMMANDS[path];
-    const body = command.body(state.val);
-    if (!body) {
-      await this.reportCommandError(vin, path + ' does not support ' + state.val + '. Nothing sent');
+    const mode = this.endpointMode(vin, on ? command.start : command.stop);
+    const request = mode === null ? null : command.request(mode, on);
+    if (!request) {
+      await this.reportCommandError(vin, path + ' cannot ' + (on ? 'start' : 'stop') + ' on this model. Nothing sent');
       return;
     }
-    if (path === 'hvac-start' && state.val) {
+    if (request === 'settings') {
+      await this.startChargingViaSettings(id, vin);
+      return;
+    }
+    const body = request.body;
+    if (path === 'hvac-start' && on) {
       const temperature = (await this.getStateAsync(vin + '.remote.hvac-temperature'))?.val ?? 21;
       if (!isValidTemperature(temperature)) {
         await this.reportCommandError(
@@ -1150,7 +1255,31 @@ class Renault extends utils.Adapter {
       }
       body.attributes = { ...body.attributes, targetTemperature: temperature };
     }
-    await this.sendCommand(id, vin, path, this.kamereonUrl(command.base, vin, command.endpoint ?? path), { data: body }, state.val);
+    await this.sendCommand(id, vin, path, this.kamereonUrl(request.base, vin, request.endpoint), { data: body }, on);
+  }
+
+  /**
+   * Vehicles that charge by schedule start charging when every program is switched off
+   * (renault-api, same as the My Renault app). Only the app switches them on again.
+   *
+   * @param {string} id
+   * @param {string} vin
+   */
+  async startChargingViaSettings(id, vin) {
+    const url = this.kamereonUrl(KCM, vin, 'ev/settings');
+    let settings;
+    try {
+      settings = (await this.requestClient({ method: 'get', url, headers: this.commandHeaders() })).data;
+    } catch (error) {
+      await this.reportCommandError(vin, 'charging failed, reading the charge settings failed: ' + error.message);
+      return;
+    }
+    if (!settings || typeof settings !== 'object' || !Array.isArray(settings.programs)) {
+      await this.reportCommandError(vin, 'charging failed, the charge settings have no program list. Nothing sent');
+      return;
+    }
+    const body = { ...settings, programs: settings.programs.map((program) => ({ ...program, programActivationStatus: false })) };
+    await this.sendCommand(id, vin, 'charging', url, body, true);
   }
 
   /**
