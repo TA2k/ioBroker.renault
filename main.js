@@ -38,11 +38,10 @@ class Renault extends utils.Adapter {
     /** @type {string[]} */
     this.accountTypes = [];
     /** @type {ioBroker.Interval | undefined | null} */
-    this.updateInterval = null;
-    /** @type {ioBroker.Interval | undefined | null} */
     this.refreshTokenInterval = null;
     /** @type {ioBroker.Timeout | undefined | null} */
-    this.refreshTimeout = null;
+    this.pollTimeout = null;
+    this.polling = false;
     this.startAttempt = 0;
     this.loginRejected = false;
   }
@@ -133,13 +132,7 @@ class Renault extends utils.Adapter {
   async connectAndPoll() {
     if ((await this.login()) && (await this.getDeviceList())) {
       await this.migrateChargeHistoryV1();
-      await this.updateDevices();
-      this.updateInterval = this.setInterval(
-        async () => {
-          await this.updateDevices();
-        },
-        this.config.interval * 60 * 1000,
-      );
+      await this.runPoll();
       this.refreshTokenInterval = this.setInterval(() => {
         this.refreshToken();
       }, 3500 * 1000);
@@ -156,6 +149,39 @@ class Renault extends utils.Adapter {
       () => this.connectAndPoll().catch((error) => this.log.error('Connection attempt failed: ' + error)),
       delayMinutes * 60 * 1000,
     );
+  }
+
+  /**
+   * Schedule the next poll first, then poll. A slow poll therefore never stops the schedule, and
+   * pollNow() skips a poll that would overlap.
+   */
+  async runPoll() {
+    this.schedulePoll(this.config.interval * 60 * 1000);
+    await this.pollNow();
+  }
+
+  /**
+   * Replace the pending poll timer.
+   *
+   * @param {number} delayMs
+   */
+  schedulePoll(delayMs) {
+    this.pollTimeout && this.clearTimeout(this.pollTimeout);
+    this.pollTimeout = this.setTimeout(() => this.runPoll().catch((error) => this.log.error('Poll failed: ' + error)), delayMs);
+  }
+
+  /** Run one poll cycle unless one is already running. */
+  async pollNow() {
+    if (this.polling) {
+      this.log.debug('Poll skipped, the previous poll is still running');
+      return;
+    }
+    this.polling = true;
+    try {
+      await this.updateDevices();
+    } finally {
+      this.polling = false;
+    }
   }
 
   /**
@@ -699,10 +725,9 @@ class Renault extends utils.Adapter {
   onUnload(callback) {
     try {
       this.setState('info.connection', false, true);
-      this.clearTimeout(this.refreshTimeout);
+      this.pollTimeout && this.clearTimeout(this.pollTimeout);
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
       this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
-      this.updateInterval && this.clearInterval(this.updateInterval);
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       callback();
     } catch (e) {
@@ -730,7 +755,7 @@ class Renault extends utils.Adapter {
         }
         if (path === 'refresh') {
           this.log.info('Force refresh');
-          this.updateDevices();
+          await this.pollNow();
           return;
         }
         const command = path.split('/')[1];
@@ -785,10 +810,7 @@ class Renault extends utils.Adapter {
               this.log.error(JSON.stringify(error.response.data));
             }
           });
-        this.clearTimeout(this.refreshTimeout);
-        this.refreshTimeout = this.setTimeout(async () => {
-          await this.updateDevices();
-        }, 20 * 1000);
+        this.schedulePoll(20 * 1000);
       }
     }
   }

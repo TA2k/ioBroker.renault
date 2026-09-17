@@ -22,8 +22,8 @@ describe('startup', () => {
     expect(adapter.deviceArray).to.deep.equal(['VIN1']);
     expect(urls(adapter).some((url) => url.includes('/cars/VIN1/battery-status'))).to.equal(true);
     expect(adapter.states['info.connection']).to.equal(true);
-    expect(adapter.timeouts).to.have.length(0);
-    expect(adapter.intervals.map((timer) => timer.ms)).to.deep.equal([adapter.config.interval * 60 * 1000, 3500 * 1000]);
+    expect(adapter.timeouts.map((timer) => timer.ms)).to.deep.equal([adapter.config.interval * 60 * 1000]);
+    expect(adapter.intervals.map((timer) => timer.ms)).to.deep.equal([3500 * 1000]);
   });
 
   it('retries with growing, capped delay when the cloud is unreachable', async () => {
@@ -40,19 +40,19 @@ describe('startup', () => {
     }
     expect(delays).to.deep.equal([5, 10, 20, 40, 60, 60]);
     expect(adapter.states['info.connection']).to.equal(false);
-    expect(adapter.updateInterval).to.equal(null);
+    expect(adapter.pollTimeout).to.equal(null);
   });
 
   it('starts polling once a retry succeeds', async () => {
     const adapter = setup({ '/vehicles?': httpError(503) });
     await adapter.onReady();
-    expect(adapter.updateInterval).to.equal(null);
+    expect(adapter.pollTimeout).to.equal(null);
     expect(adapter.states['info.connection']).to.equal(true);
 
     adapter.requestClient = setup().requestClient;
     await adapter.timeouts.pop()?.fn();
     expect(adapter.deviceArray).to.deep.equal(['VIN1']);
-    expect(adapter.updateInterval).to.not.equal(null);
+    expect(adapter.pollTimeout).to.not.equal(null);
   });
 
   it('does not retry a login the account service rejected', async () => {
@@ -211,5 +211,56 @@ describe('subscriptions', () => {
     const adapter = setup();
     await adapter.onReady();
     expect(adapter.subscribeStates.args).to.deep.equal([['*.remote.*']]);
+  });
+});
+
+describe('poll scheduling', () => {
+  const battery = (adapter) => urls(adapter).filter((url) => url.includes('/battery-status'));
+
+  it('schedules the next poll before it polls', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    const first = adapter.timeouts[0];
+    adapter.requestClient.resetHistory();
+    await first.fn();
+    expect(adapter.timeouts.map((timer) => timer.ms)).to.deep.equal([15 * 60 * 1000, 15 * 60 * 1000]);
+    expect(adapter.clearTimeout.calledWith(first)).to.equal(true);
+    expect(battery(adapter)).to.have.length(1);
+  });
+
+  it('skips a poll and a refresh while the previous poll still runs', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    /** @type {(value: unknown) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => (release = resolve));
+    adapter.requestClient = setup({ '/battery-status': () => gate }).requestClient;
+    const running = adapter.pollNow();
+    await adapter.pollNow();
+    await adapter.onStateChange('renault.0.VIN1.remote.refresh', userWrite(true));
+    expect(battery(adapter)).to.have.length(1);
+    release({});
+    await running;
+    await adapter.pollNow();
+    expect(battery(adapter)).to.have.length(2);
+  });
+
+  it('polls 20 seconds after a command instead of at the pending time', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    const pending = adapter.timeouts[0];
+    await adapter.onStateChange('renault.0.VIN1.remote.actions/hvac-start', userWrite(true));
+    expect(adapter.clearTimeout.calledWith(pending)).to.equal(true);
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
+  });
+
+  it('stops the poll timer on unload and clears no empty handle', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    const callback = sinon.spy();
+    adapter.onUnload(callback);
+    expect(adapter.clearTimeout.calledWith(adapter.timeouts[0])).to.equal(true);
+    expect(adapter.clearTimeout.getCalls().every((call) => call.args[0])).to.equal(true);
+    expect(callback.calledOnce).to.equal(true);
   });
 });
