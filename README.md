@@ -66,6 +66,8 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) an endpoint that has answered with server errors for 24 hours is asked only hourly until it answers again
+- (typhosj) `hvac-temperature` starts at 21 °C instead of empty
 - (typhosj) the refresh button, and `charging` on models that cannot stop charging, are reset to false with ack after they were handled
 - (typhosj) an endpoint that answers with only a message and no data (cockpit v2 on the Zoe phase 2) counts as not supported
 - (typhosj) a server error (5xx) is logged as warning once per endpoint and vehicle, with the endpoint name; repeats go to the debug log until the endpoint answers again

@@ -55,6 +55,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 // Home Assistant limits its Renault integration to 60 requests per hour for the same reason.
 const QUOTA_PER_HOUR = 60;
+const DEFAULT_TEMPERATURE = 21;
 
 /** @typedef {{ path: string, url: string, desc: string, channel?: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
 
@@ -205,7 +206,12 @@ class Renault extends utils.Adapter {
     this.ignoreState = {};
     /** @type {Record<string, Set<string>>} vin -> endpoint paths that answered 2xx in this run */
     this.answered = {};
-    /** @type {Record<string, Set<string>>} vin -> endpoint paths whose last answer was a server error */
+    /**
+     * vin -> endpoint path -> start of an unbroken series of server errors, and whether the endpoint
+     * is asked only hourly because the series lasts 24 hours
+     *
+     * @type {Record<string, Record<string, { since: number, hourly: boolean }>>}
+     */
     this.serverErrors = {};
     /** @type {Record<string, string | undefined>} vin -> model code, e.g. X102VE */
     this.modelCodes = {};
@@ -624,6 +630,7 @@ class Renault extends utils.Adapter {
                 type: 'number',
                 role: 'level.temperature',
                 unit: '°C',
+                def: DEFAULT_TEMPERATURE,
               });
             }
           }
@@ -660,9 +667,16 @@ class Renault extends utils.Adapter {
                 read: remote.read ?? true,
                 write: remote.write ?? true,
                 ...(remote.unit ? { unit: remote.unit } : {}),
+                ...(remote.def !== undefined ? { def: remote.def } : {}),
               },
               native: {},
             });
+          }
+          if (!unsupported.includes('hvac-start')) {
+            const temperatureId = device.vin + '.remote.hvac-temperature';
+            if ((await this.getStateAsync(temperatureId))?.val == null) {
+              await this.setState(temperatureId, DEFAULT_TEMPERATURE, true);
+            }
           }
           delete device.mileage;
           await this.json2iob.parse(device.vin + '.general', device, { channelName: 'Vehicle details', write: false });
@@ -988,6 +1002,10 @@ class Renault extends utils.Adapter {
     if (since !== undefined && now - since < DAY_MS) {
       return false;
     }
+    const failing = this.serverErrors[vin]?.[element.path];
+    if (failing && !hourlyDue && now - failing.since >= DAY_MS) {
+      return false;
+    }
     const cockpit = this.cockpitChoice[vin];
     if (element.path === 'cockpitv2') {
       return cockpit !== 'cockpit';
@@ -1056,7 +1074,8 @@ class Renault extends utils.Adapter {
     } catch (error) {
       return this.handlePollError(vin, element, error);
     }
-    if (this.serverErrors[vin]?.delete(element.path)) {
+    if (this.serverErrors[vin]?.[element.path]) {
+      delete this.serverErrors[vin][element.path];
       this.log.info(element.path + ' of ' + vin + ' answers again');
     }
     if (isPlaceholder(res.data)) {
@@ -1126,12 +1145,17 @@ class Renault extends utils.Adapter {
     }
     if (status >= 500) {
       const message = 'Renault server error ' + status + ' for ' + element.path + ' of ' + vin;
-      const failing = (this.serverErrors[vin] ??= new Set());
-      if (failing.has(element.path)) {
-        this.log.debug(message);
-      } else {
-        failing.add(element.path);
+      const failing = (this.serverErrors[vin] ??= {});
+      const series = failing[element.path];
+      if (!series) {
+        failing[element.path] = { since: Date.now(), hourly: false };
         this.log.warn(message + '. Repeats are logged at debug level until the endpoint answers again');
+        return 'failed';
+      }
+      this.log.debug(message);
+      if (!series.hourly && Date.now() - series.since >= DAY_MS) {
+        series.hourly = true;
+        this.log.info(element.path + ' of ' + vin + ' is asked hourly from now on, it has answered with server errors for 24 hours');
       }
       return 'failed';
     }
@@ -1315,7 +1339,7 @@ class Renault extends utils.Adapter {
     }
     const body = request.body;
     if (path === 'hvac-start' && on) {
-      const temperature = (await this.getStateAsync(vin + '.remote.hvac-temperature'))?.val ?? 21;
+      const temperature = (await this.getStateAsync(vin + '.remote.hvac-temperature'))?.val ?? DEFAULT_TEMPERATURE;
       if (!isValidTemperature(temperature)) {
         await this.reportCommandError(
           vin,

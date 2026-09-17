@@ -216,6 +216,60 @@ describe('server errors', () => {
     expect(warnings(adapter)).to.have.length(2);
   });
 
+  it('asks an endpoint that failed for 24 hours only hourly until it answers again', async () => {
+    const now = useClock();
+    let failing = true;
+    const adapter = setup({ '/hvac-settings?': () => (failing ? httpError(502) : {}) });
+    const asked = () => urls(adapter).filter((url) => url.includes('/hvac-settings?')).length;
+    const slowed = () => logged(adapter.log.info).filter((line) => line.includes('hvac-settings of VIN1 is asked hourly'));
+    await adapter.onReady();
+    for (let i = 0; i < 143; i++) {
+      now.tick(10 * 60 * 1000);
+      await adapter.updateDevices();
+    }
+    // 23 h 50 min after the first error: still asked on every poll
+    expect(asked()).to.equal(144);
+    expect(slowed()).to.deep.equal([]);
+    now.tick(10 * 60 * 1000);
+    await adapter.updateDevices();
+    expect(asked()).to.equal(145);
+    expect(slowed()).to.have.length(1);
+    for (let i = 0; i < 5; i++) {
+      now.tick(10 * 60 * 1000);
+      await adapter.updateDevices();
+    }
+    expect(asked()).to.equal(145);
+    now.tick(10 * 60 * 1000);
+    await adapter.updateDevices();
+    expect(asked()).to.equal(146);
+    expect(slowed()).to.have.length(1);
+    failing = false;
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    now.tick(10 * 60 * 1000);
+    await adapter.updateDevices();
+    expect(asked()).to.equal(148);
+  });
+
+  it('counts the 24 hours from the first error of an unbroken series', async () => {
+    const now = useClock();
+    let failing = true;
+    const adapter = setup({ '/hvac-settings?': () => (failing ? httpError(502) : {}) });
+    const asked = () => urls(adapter).filter((url) => url.includes('/hvac-settings?')).length;
+    await adapter.onReady();
+    now.tick(20 * HOUR);
+    failing = false;
+    await adapter.updateDevices();
+    failing = true;
+    now.tick(10 * 60 * 1000);
+    await adapter.updateDevices();
+    now.tick(5 * HOUR);
+    await adapter.updateDevices();
+    now.tick(10 * 60 * 1000);
+    await adapter.updateDevices();
+    expect(asked()).to.equal(5);
+  });
+
   it('does not report an endpoint as answering again when it never failed', async () => {
     const adapter = setup();
     await adapter.onReady();
@@ -1175,6 +1229,41 @@ describe('commands', () => {
       /** @type {ioBroker.State} */ (/** @type {unknown} */ ({ val: true, ack: true })),
     );
     expect(posts(adapter)).to.deep.equal([]);
+  });
+});
+
+describe('target temperature', () => {
+  it('declares 21 °C as default and writes it when the state is empty', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    expect(adapter.objects.get('renault.0.VIN1.remote.hvac-temperature')?.common).to.include({ def: 21 });
+    expect(adapter.states['VIN1.remote.hvac-temperature']).to.equal(21);
+    expect(adapter.acks['VIN1.remote.hvac-temperature']).to.equal(true);
+  });
+
+  for (const empty of [null, undefined]) {
+    it(`writes the default over a stored ${empty}`, async () => {
+      const adapter = setup();
+      adapter.states['VIN1.remote.hvac-temperature'] = empty;
+      await adapter.onReady();
+      expect(adapter.states['VIN1.remote.hvac-temperature']).to.equal(21);
+    });
+  }
+
+  for (const kept of [18, 0]) {
+    it(`keeps a stored value ${kept}`, async () => {
+      const adapter = setup();
+      adapter.states['VIN1.remote.hvac-temperature'] = kept;
+      await adapter.onReady();
+      await adapter.getDeviceList();
+      expect(adapter.states['VIN1.remote.hvac-temperature']).to.equal(kept);
+    });
+  }
+
+  it('writes no temperature for a model without climate control', async () => {
+    const adapter = setup({ '/vehicles?': vehicleOf('XJA1VP') });
+    await adapter.onReady();
+    expect(adapter.states).to.not.have.property('VIN1.remote.hvac-temperature');
   });
 });
 
