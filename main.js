@@ -163,6 +163,21 @@ const LEGACY_REMOTE_IDS = {
 };
 
 /**
+ * An answer that carries only a message instead of vehicle data.
+ *
+ * @param {unknown} body
+ */
+function isPlaceholder(body) {
+  return (
+    body !== null &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    Object.keys(body).length === 1 &&
+    typeof (/** @type {Record<string, unknown>} */ (body).message) === 'string'
+  );
+}
+
+/**
  * No source (renault-api, Home Assistant, ZoePHP) documents a range; like Home Assistant, only a
  * positive number is required and the cloud rejects the rest.
  *
@@ -918,7 +933,15 @@ class Renault extends utils.Adapter {
   async chooseCockpit() {
     let changed = false;
     for (const vin of this.deviceArray) {
-      if (this.cockpitChoice[vin]) {
+      const chosen = this.cockpitChoice[vin];
+      if (chosen && this.ignoreState[vin]?.[chosen] !== undefined) {
+        // An earlier version kept a cockpit that does not deliver data; choose again.
+        delete this.cockpitChoice[vin];
+        changed = true;
+        this.log.info('Vehicle ' + vin + ' gets no data from ' + chosen + ', trying the other cockpit version again');
+        continue;
+      }
+      if (chosen) {
         continue;
       }
       const answered = this.answered[vin] ?? new Set();
@@ -1025,6 +1048,13 @@ class Renault extends utils.Adapter {
     } catch (error) {
       return this.handlePollError(vin, element, error);
     }
+    if (isPlaceholder(res.data)) {
+      // The gateway answers 200 with only a message for endpoints the car does not have
+      // (cockpit v2 on the Zoe phase 2: "you should not be there but well done for the effort").
+      this.log.debug(element.path + ' for ' + vin + ' answered without data: ' + JSON.stringify(res.data));
+      this.rejectEndpoint(vin, element);
+      return 'failed';
+    }
     (this.answered[vin] ??= new Set()).add(element.path);
     if (this.ignoreState[vin]?.[element.path] !== undefined) {
       delete this.ignoreState[vin][element.path];
@@ -1077,14 +1107,10 @@ class Renault extends utils.Adapter {
       this.log.debug(element.path + ' for ' + vin + ' answered 401');
       return 'unauthorized';
     }
-    if ((status === 400 || status === 403 || status === 404) && !this.answered[vin]?.has(element.path)) {
-      const ignore = (this.ignoreState[vin] ??= {});
-      if (ignore[element.path] === undefined) {
-        this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for 24 hours.');
-      }
-      ignore[element.path] = Date.now();
+    if (status === 400 || status === 403 || status === 404) {
       this.log.debug(String(error));
       this.log.debug(JSON.stringify(error.response.data));
+      this.rejectEndpoint(vin, element);
       return 'failed';
     }
     if (status >= 500) {
@@ -1094,6 +1120,23 @@ class Renault extends utils.Adapter {
     this.log.error('Fetching ' + element.path + ' for ' + vin + ' failed: ' + error);
     error.response && this.log.error(JSON.stringify(error.response.data));
     return 'failed';
+  }
+
+  /**
+   * The car does not offer this endpoint: skip it for 24 hours, unless it answered in this run.
+   *
+   * @param {string} vin
+   * @param {Endpoint} element
+   */
+  rejectEndpoint(vin, element) {
+    if (this.answered[vin]?.has(element.path)) {
+      return;
+    }
+    const ignore = (this.ignoreState[vin] ??= {});
+    if (ignore[element.path] === undefined) {
+      this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for 24 hours.');
+    }
+    ignore[element.path] = Date.now();
   }
 
   /** Stop polling for a while after Renault answered with its quota error; each pause in a row is longer. */

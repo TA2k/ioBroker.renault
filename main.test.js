@@ -1406,3 +1406,75 @@ describe('charging on schedule-based vehicles', () => {
     });
   }
 });
+
+describe('answers without data', () => {
+  const PLACEHOLDER = { message: 'you should not be there but well done for the effort' };
+  const v1 = (adapter) => urls(adapter).filter((url) => url.includes('/v1/cars/VIN1/cockpit?'));
+  const v2 = (adapter) => urls(adapter).filter((url) => url.includes('/v2/cars/VIN1/cockpit?'));
+  const choice = (adapter) => JSON.parse(adapter.states['info.cockpitVersion'] ?? '{}');
+  const parsed = (adapter, path) => adapter.json2iob.parse.getCalls().filter((call) => call.args[0] === 'VIN1.' + path);
+
+  it('keeps cockpit v1 when v2 answers with a message only (Zoe phase 2)', async () => {
+    useClock();
+    const adapter = setup({ '/v2/cars/VIN1/cockpit?': PLACEHOLDER });
+    await adapter.onReady();
+    await adapter.updateDevices();
+    expect(parsed(adapter, 'cockpitv2')).to.deep.equal([]);
+    expect(adapter.deleted.filter((id) => id.includes('cockpit'))).to.deep.equal(['VIN1.cockpitv2']);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpit' });
+    expect(v1(adapter)).to.have.length(2);
+    expect(v2(adapter)).to.have.length(1);
+    expect(logged(adapter.log.info).some((line) => line.includes('Ignore cockpitv2 for 24 hours'))).to.equal(true);
+  });
+
+  it('drops a stored cockpit choice whose version answers without data and switches to v1', async () => {
+    useClock();
+    const adapter = setup({ '/v2/cars/VIN1/cockpit?': PLACEHOLDER });
+    adapter.states['info.cockpitVersion'] = JSON.stringify({ VIN1: 'cockpitv2' });
+    await adapter.onReady();
+    expect(v1(adapter)).to.deep.equal([]);
+    expect(choice(adapter)).to.deep.equal({});
+    await adapter.updateDevices();
+    expect(v1(adapter)).to.have.length(1);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpit' });
+    expect(adapter.deleted.filter((id) => id.includes('cockpit'))).to.deep.equal(['VIN1.cockpitv2']);
+  });
+
+  it('ignores any endpoint that answers with a message only for 24 hours', async () => {
+    const now = useClock();
+    const adapter = setup({ '/location?': PLACEHOLDER });
+    await adapter.onReady();
+    now.tick(DAY - 1);
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes('/location?'))).to.have.length(1);
+    expect(parsed(adapter, 'location')).to.deep.equal([]);
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes('/location?'))).to.have.length(2);
+  });
+
+  it('keeps polling an endpoint that answered with data before', async () => {
+    useClock();
+    let empty = false;
+    const adapter = setup({ '/location?': () => (empty ? PLACEHOLDER : { data: { attributes: { gpsLatitude: 1 } } }) });
+    await adapter.onReady();
+    empty = true;
+    await adapter.updateDevices();
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes('/location?'))).to.have.length(3);
+  });
+
+  for (const [name, body] of [
+    ['a message next to data', { message: 'note', data: { attributes: { gpsLatitude: 1 } } }],
+    ['a message that is no string', { message: 5 }],
+    ['an empty object', {}],
+  ]) {
+    it(`treats ${name} as an answer`, async () => {
+      useClock();
+      const adapter = setup({ '/location?': body });
+      await adapter.onReady();
+      expect(parsed(adapter, 'location')).to.have.length(1);
+      expect(adapter.ignoreState.VIN1.location).to.equal(undefined);
+    });
+  }
+});

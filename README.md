@@ -66,6 +66,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) an endpoint that answers with only a message and no data (cockpit v2 on the Zoe phase 2) counts as not supported, so the cockpit channel with data is kept
 - (typhosj) breaking: `actions/hvac-start` is renamed to `hvac-start`, and `actions/charging-start`, `charge/pause-resume` and `charge/start` are replaced by one state `charging`; the old states are removed, scripts and visualizations need the new names
 - (typhosj) commands and polled data follow the endpoint table of renault-api per model: `charging` and the climate control stop send the request the model needs, and commands or data the model does not offer are not created or polled
 - (typhosj) `charging` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs
