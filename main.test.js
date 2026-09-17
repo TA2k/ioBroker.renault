@@ -680,8 +680,8 @@ describe('request budget', () => {
     const check = sinon.spy(adapter, 'checkRequestBudget');
     await adapter.onReady();
     await adapter.updateDevices();
-    // 11 non-history endpoints minus the ignored lock-status, plus the two hourly history endpoints
-    expect(check.args).to.deep.equal([[10, 2]]);
+    // 11 non-history endpoints minus the ignored lock-status and minus cockpit v1, plus the two hourly history endpoints
+    expect(check.args).to.deep.equal([[9, 2]]);
     expect(budget(adapter)).to.have.length(1);
   });
 
@@ -768,5 +768,91 @@ describe('ignored endpoints', () => {
     now.tick(HOUR);
     await adapter.updateDevices();
     expect(lock(adapter)).to.have.length(1);
+  });
+});
+
+describe('cockpit version', () => {
+  const v1 = (adapter) => urls(adapter).filter((url) => url.includes('/v1/cars/VIN1/cockpit?'));
+  const v2 = (adapter) => urls(adapter).filter((url) => url.includes('/v2/cars/VIN1/cockpit?'));
+  const cockpitDeletes = (adapter) => adapter.deleted.filter((id) => id.includes('cockpit'));
+  const choice = (adapter) => JSON.parse(adapter.states['info.cockpitVersion'] ?? '{}');
+
+  it('keeps v2 when both versions answer and deletes the v1 channel once', async () => {
+    useClock();
+    const adapter = setup();
+    await adapter.onReady();
+    await adapter.updateDevices();
+    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpit']);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
+    expect(v1(adapter)).to.have.length(1);
+    expect(v2(adapter)).to.have.length(2);
+  });
+
+  it('keeps v1 when v2 is not supported and deletes the v2 channel', async () => {
+    useClock();
+    const adapter = setup({ '/v2/cars/VIN1/cockpit?': httpError(404) });
+    await adapter.onReady();
+    await adapter.updateDevices();
+    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpitv2']);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpit' });
+    expect(v1(adapter)).to.have.length(2);
+  });
+
+  it('keeps v2 when v1 is not supported', async () => {
+    useClock();
+    const adapter = setup({ '/v1/cars/VIN1/cockpit?': httpError(404) });
+    await adapter.onReady();
+    expect(cockpitDeletes(adapter)).to.deep.equal(['VIN1.cockpit']);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
+  });
+
+  for (const status of [401, 429, 503]) {
+    it(`decides nothing and deletes nothing when v2 answers ${status}`, async () => {
+      useClock();
+      let tokens = 0;
+      const adapter = setup({
+        '/v2/cars/VIN1/cockpit?': httpError(status),
+        // the login gets a token, the refresh after the 401 fails, so the cycle ends there
+        'accounts.getJWT': () => (tokens++ === 0 ? { id_token: 'ID_TOKEN' } : httpError(500)),
+      });
+      await adapter.onReady();
+      expect(v1(adapter)).to.have.length(1);
+      expect(cockpitDeletes(adapter)).to.deep.equal([]);
+      expect(choice(adapter)).to.deep.equal({});
+    });
+  }
+
+  it('decides nothing when neither version is supported', async () => {
+    useClock();
+    const adapter = setup({ '/cars/VIN1/cockpit?': httpError(404) });
+    await adapter.onReady();
+    expect(cockpitDeletes(adapter)).to.deep.equal([]);
+    expect(choice(adapter)).to.deep.equal({});
+  });
+
+  it('uses the stored choice after a restart without asking v1 again', async () => {
+    useClock();
+    const adapter = setup();
+    adapter.states['info.cockpitVersion'] = JSON.stringify({ VIN1: 'cockpitv2' });
+    await adapter.onReady();
+    expect(v1(adapter)).to.deep.equal([]);
+    expect(v2(adapter)).to.have.length(1);
+    expect(cockpitDeletes(adapter)).to.deep.equal([]);
+  });
+
+  for (const stored of ['not json', '[]', 'null', JSON.stringify({ VIN1: 'cockpitv3' })]) {
+    it(`ignores the invalid stored value ${stored}`, async () => {
+      useClock();
+      const adapter = setup();
+      adapter.states['info.cockpitVersion'] = stored;
+      await adapter.onReady();
+      expect(v1(adapter)).to.have.length(1);
+      expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
+    });
+  }
+
+  it('declares the marker state', () => {
+    const object = require('./io-package.json').instanceObjects.find((entry) => entry._id === 'info.cockpitVersion');
+    expect(object?.common).to.include({ type: 'string', role: 'json', read: true, write: false, def: '{}' });
   });
 });

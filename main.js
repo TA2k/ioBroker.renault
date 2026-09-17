@@ -97,6 +97,8 @@ class Renault extends utils.Adapter {
     this.quotaPausedUntil = 0;
     this.lastHourlyPoll = -Infinity;
     this.budgetChecked = false;
+    /** @type {Record<string, 'cockpit' | 'cockpitv2'>} */
+    this.cockpitChoice = {};
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -205,6 +207,7 @@ class Renault extends utils.Adapter {
     if ((await this.login()) && (await this.getDeviceList())) {
       this.startAttempt = 0;
       await this.migrateChargeHistoryV1();
+      await this.loadCockpitChoice();
       await this.runPoll();
       this.refreshTokenInterval = this.setInterval(() => {
         this.refreshToken();
@@ -703,6 +706,7 @@ class Renault extends utils.Adapter {
     if (hourlyDue) {
       this.lastHourlyPoll = now;
     }
+    await this.chooseCockpit();
     if (!this.budgetChecked) {
       this.budgetChecked = true;
       let pollRequests = 0;
@@ -720,6 +724,60 @@ class Renault extends utils.Adapter {
     }
   }
 
+  /** Read the cockpit version kept per vehicle; anything malformed counts as no choice. */
+  async loadCockpitChoice() {
+    this.cockpitChoice = {};
+    const state = await this.getStateAsync('info.cockpitVersion');
+    let stored;
+    try {
+      stored = JSON.parse(String(state?.val ?? '{}'));
+    } catch {
+      return;
+    }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return;
+    }
+    for (const [vin, version] of Object.entries(stored)) {
+      if (version === 'cockpit' || version === 'cockpitv2') {
+        this.cockpitChoice[vin] = version;
+      }
+    }
+  }
+
+  /**
+   * Once per vehicle, keep the cockpit version that answers and delete the channel of the other.
+   * v2 wins when both answer. v1 is kept only after v2 was rejected as unsupported, and nothing is
+   * decided while neither answered, so a 401, 429 or 5xx never deletes a channel.
+   */
+  async chooseCockpit() {
+    let changed = false;
+    for (const vin of this.deviceArray) {
+      if (this.cockpitChoice[vin]) {
+        continue;
+      }
+      const answered = this.answered[vin] ?? new Set();
+      /** @type {'cockpit' | 'cockpitv2' | undefined} */
+      let keep;
+      if (answered.has('cockpitv2')) {
+        keep = 'cockpitv2';
+      } else if (answered.has('cockpit') && this.ignoreState[vin]?.cockpitv2 !== undefined) {
+        keep = 'cockpit';
+      } else {
+        continue;
+      }
+      const drop = keep === 'cockpitv2' ? 'cockpit' : 'cockpitv2';
+      await this.delObjectAsync(vin + '.' + drop, { recursive: true }).catch((error) =>
+        this.log.debug('Removing ' + vin + '.' + drop + ' failed: ' + error),
+      );
+      this.cockpitChoice[vin] = keep;
+      changed = true;
+      this.log.info('Vehicle ' + vin + ' uses ' + keep + ', removed the unused channel ' + drop);
+    }
+    if (changed) {
+      await this.setState('info.cockpitVersion', JSON.stringify(this.cockpitChoice), true);
+    }
+  }
+
   /**
    * Whether a cycle at `now` requests this endpoint for this vehicle.
    *
@@ -733,7 +791,11 @@ class Renault extends utils.Adapter {
       return false;
     }
     const since = this.ignoreState[vin]?.[element.path];
-    return since === undefined || now - since >= DAY_MS;
+    if (since !== undefined && now - since < DAY_MS) {
+      return false;
+    }
+    const cockpit = this.cockpitChoice[vin];
+    return !(cockpit && (element.path === 'cockpit' || element.path === 'cockpitv2') && element.path !== cockpit);
   }
 
   /**

@@ -205,6 +205,19 @@
         "def": false
       },
       "native": {}
+    },
+    {
+      "_id": "info.cockpitVersion",
+      "type": "state",
+      "common": {
+        "role": "json",
+        "name": "Cockpit endpoint version kept per vehicle",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": "{}"
+      },
+      "native": {}
     }
   ]
 }
