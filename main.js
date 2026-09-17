@@ -58,6 +58,34 @@ const QUOTA_PER_HOUR = 60;
 
 /** @typedef {{ path: string, url: string, desc: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
 
+const KCA = 'kca/car-adapter/v1/cars/';
+const KCM = 'kcm/v1/vehicles/';
+
+/** @typedef {{ base: string, endpoint?: string, body: (on: boolean) => { type: string, attributes?: Record<string, unknown> } | null }} RemoteCommand */
+
+/**
+ * Boolean remote commands, keyed by the state below <vin>.remote. The bodies follow renault-api;
+ * body() returns null when the value has no endpoint.
+ *
+ * @type {Record<string, RemoteCommand>}
+ */
+const REMOTE_COMMANDS = {
+  'actions/hvac-start': { base: KCA, body: (on) => ({ type: 'HvacStart', attributes: { action: on ? 'start' : 'cancel' } }) },
+  'actions/charging-start': { base: KCA, body: (on) => ({ type: 'ChargingStart', attributes: { action: on ? 'start' : 'stop' } }) },
+  'charge/pause-resume': { base: KCM, body: (on) => ({ type: 'ChargePauseResume', attributes: { action: on ? 'resume' : 'pause' } }) },
+  'charge/start': { base: KCM, body: (on) => (on ? { type: 'ChargingStart', attributes: { action: 'start' } } : null) },
+};
+
+/**
+ * No source (renault-api, Home Assistant, ZoePHP) documents a range; like Home Assistant, only a
+ * positive number is required and the cloud rejects the rest.
+ *
+ * @param {unknown} value
+ */
+function isValidTemperature(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
 class Renault extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -452,32 +480,30 @@ class Renault extends utils.Adapter {
             native: {},
           });
 
-          const remoteArray = [
-            { command: 'actions/hvac-start', name: 'True = Start, False = Stop' },
-            {
-              command: 'hvac-temperature',
-              name: 'HVAC Temperature',
-              type: /** @type {ioBroker.CommonType} */ ('number'),
-              role: 'value',
-            },
-            { command: 'actions/charging-start', name: 'True = Start, False = Stop' },
-            { command: 'charge/pause-resume', name: 'True = Start, False = Stop' },
-            { command: 'charge/start', name: 'True = Start, False = Stop' },
-            { command: 'refresh', name: 'True = Refresh Data' },
+          const remoteObjects = [
+            { id: 'actions/hvac-start', name: 'Climate control: true = start, false = stop', type: 'boolean', role: 'switch' },
+            { id: 'hvac-temperature', name: 'Climate control target temperature', type: 'number', role: 'level.temperature', unit: '°C' },
+            { id: 'actions/charging-start', name: 'Charging: true = start, false = stop', type: 'boolean', role: 'switch' },
+            { id: 'charge/pause-resume', name: 'Charging: true = resume, false = pause', type: 'boolean', role: 'switch' },
+            { id: 'charge/start', name: 'Start charging (KCM vehicles)', type: 'boolean', role: 'button.start', read: false },
+            { id: 'refresh', name: 'Refresh vehicle data', type: 'boolean', role: 'button', read: false },
+            { id: 'lastError', name: 'Error of the last command, empty after a success', type: 'string', role: 'text', write: false },
           ];
-          remoteArray.forEach((remote) => {
-            this.setObjectNotExists(device.vin + '.remote.' + remote.command, {
+          for (const remote of remoteObjects) {
+            // extendObject, so installations of older versions get the new roles too
+            await this.extendObjectAsync(device.vin + '.remote.' + remote.id, {
               type: 'state',
               common: {
-                name: remote.name || '',
-                type: /** @type {ioBroker.CommonType} */ (remote.type || 'boolean'),
-                role: remote.role || 'button',
-                write: true,
-                read: true,
+                name: remote.name,
+                type: /** @type {ioBroker.CommonType} */ (remote.type),
+                role: remote.role,
+                read: remote.read ?? true,
+                write: remote.write ?? true,
+                ...(remote.unit ? { unit: remote.unit } : {}),
               },
               native: {},
             });
-          });
+          }
           delete device.mileage;
           await this.json2iob.parse(device.vin + '.general', device, { channelName: 'Vehicle details' });
         }
@@ -987,17 +1013,6 @@ class Renault extends utils.Adapter {
     );
   }
 
-  toCamelCase(string) {
-    if (!string) {
-      return;
-    }
-    string = string.replace('actions/', '');
-    string = string.replace('/', '-');
-    const camelC = string.replace(/-([a-z])/g, function (g) {
-      return g[1].toUpperCase();
-    });
-    return camelC.charAt(0).toUpperCase() + camelC.slice(1);
-  }
   /**
    * Is called when adapter shuts down - callback has to be called under any circumstances!
    * @param {() => void} callback
@@ -1018,81 +1033,135 @@ class Renault extends utils.Adapter {
 
   /**
    * Is called if a subscribed state changes
+   *
    * @param {string} id
    * @param {ioBroker.State | null | undefined} state
    */
   async onStateChange(id, state) {
-    if (state) {
-      if (!state.ack) {
-        const deviceId = id.split('.')[2];
-        const path = id.split('.')[4];
-        if (path === 'hvac-temperature') {
-          return;
-        }
-        if (!this.account) {
-          this.log.error('No account found');
-          return;
-        }
-        if (path === 'refresh') {
-          this.log.info('Force refresh');
-          await this.pollNow();
-          return;
-        }
-        const command = path.split('/')[1];
-        let action = state.val ? 'start' : 'cancel';
-        let midPart = 'kca/car-adapter/v1/cars/';
-        if (path === 'charge/pause-resume') {
-          action = state.val ? 'resume' : 'pause';
-          midPart = 'kcm/v1/vehicles/';
-        }
-        const data = { data: { type: this.toCamelCase(path), attributes: { action: action } } };
-        if (command === 'hvac-start') {
-          const temperatureState = await this.getStateAsync(deviceId + '.remote.hvac-temperature');
-          if (temperatureState) {
-            data.data.attributes.targetTemperature = temperatureState.val ? temperatureState.val : 21;
-          } else {
-            data.data.attributes.targetTemperature = 21;
-          }
-        }
-        const url =
-          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
-          this.account.accountId +
-          '/kamereon/' +
-          midPart +
-          deviceId +
-          '/' +
-          path +
-          '?country=' +
-          this.country;
-        this.log.debug(JSON.stringify(data));
-        this.log.debug(url);
-        await this.requestClient({
-          method: 'post',
-          url: url,
-          headers: {
-            apikey: this.apiKeyUpdate,
-            'content-type': 'application/vnd.api+json',
-            accept: '*/*',
-            'user-agent': this.userAgent,
-            'accept-language': this.locale.toLowerCase(),
-            'x-gigya-id_token': this.session.id_token,
-            'X-Amzn-Trace-Id': this.buildTraceId(),
-          },
-          data: data,
-        })
-          .then((res) => {
-            this.log.info(JSON.stringify(res.data));
-            return res.data;
-          })
-          .catch((error) => {
-            this.log.error('Command ' + path + ' failed: ' + error);
-            if (error.response) {
-              this.log.error(JSON.stringify(error.response.data));
-            }
-          });
-        this.schedulePoll(20 * 1000);
-      }
+    if (!state || state.ack) {
+      return;
     }
+    const [, , vin, channel, path] = id.split('.');
+    if (channel !== 'remote' || !this.deviceArray.includes(vin)) {
+      return;
+    }
+    if (path === 'hvac-temperature') {
+      if (isValidTemperature(state.val)) {
+        await this.setState(id, state.val, true);
+      } else {
+        this.log.warn('hvac-temperature must be a number above 0, got ' + JSON.stringify(state.val) + '. Value ignored');
+      }
+      return;
+    }
+    if (!this.account) {
+      this.log.error('No account found');
+      return;
+    }
+    if (path === 'refresh') {
+      this.log.info('Force refresh');
+      await this.pollNow();
+      return;
+    }
+    if (!Object.hasOwn(REMOTE_COMMANDS, path)) {
+      this.log.debug('No command behind ' + path + ', nothing sent');
+      return;
+    }
+    if (typeof state.val !== 'boolean') {
+      await this.reportCommandError(vin, path + ' takes true or false, got ' + JSON.stringify(state.val) + '. Nothing sent');
+      return;
+    }
+    const command = REMOTE_COMMANDS[path];
+    const body = command.body(state.val);
+    if (!body) {
+      await this.reportCommandError(vin, path + ' does not support ' + state.val + '. Nothing sent');
+      return;
+    }
+    if (path === 'actions/hvac-start' && state.val) {
+      const temperature = (await this.getStateAsync(vin + '.remote.hvac-temperature'))?.val ?? 21;
+      if (!isValidTemperature(temperature)) {
+        await this.reportCommandError(
+          vin,
+          'hvac-temperature must be a number above 0, got ' + JSON.stringify(temperature) + '. Nothing sent',
+        );
+        return;
+      }
+      body.attributes = { ...body.attributes, targetTemperature: temperature };
+    }
+    await this.sendCommand(id, vin, path, this.kamereonUrl(command.base, vin, command.endpoint ?? path), { data: body }, state.val);
+  }
+
+  /**
+   * @param {string} base KCA or KCM
+   * @param {string} vin
+   * @param {string} endpoint
+   */
+  kamereonUrl(base, vin, endpoint) {
+    return (
+      'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+      this.account.accountId +
+      '/kamereon/' +
+      base +
+      vin +
+      '/' +
+      endpoint +
+      '?country=' +
+      this.country
+    );
+  }
+
+  /** @returns {Record<string, string>} */
+  commandHeaders() {
+    return {
+      apikey: this.apiKeyUpdate,
+      'content-type': 'application/vnd.api+json',
+      accept: '*/*',
+      'user-agent': this.userAgent,
+      'accept-language': this.locale.toLowerCase(),
+      'x-gigya-id_token': this.session.id_token,
+      'X-Amzn-Trace-Id': this.buildTraceId(),
+    };
+  }
+
+  /**
+   * POST a command, confirm the state on success and record the outcome in remote.lastError.
+   * Polls 20 seconds later, so the result shows up in the data states.
+   *
+   * @param {string} id full id of the command state
+   * @param {string} vin
+   * @param {string} name command name for log and lastError
+   * @param {string} url
+   * @param {unknown} data request body
+   * @param {ioBroker.StateValue} val value to confirm
+   * @returns {Promise<boolean>} true when the cloud accepted the command
+   */
+  async sendCommand(id, vin, name, url, data, val) {
+    this.log.debug(name + ' for ' + vin + ': ' + JSON.stringify(data));
+    let accepted = false;
+    try {
+      const res = await this.requestClient({ method: 'post', url, headers: this.commandHeaders(), data });
+      this.log.info('Command ' + name + ' for ' + vin + ' accepted');
+      this.log.debug(JSON.stringify(res.data));
+      await this.setState(id, val, true);
+      await this.setState(vin + '.remote.lastError', '', true);
+      accepted = true;
+    } catch (error) {
+      const code = error.response?.data?.errors?.[0]?.errorCode;
+      const message = 'Command ' + name + ' failed: ' + error.message + (code ? ' (' + code + ')' : '');
+      this.log.error(message + ' for ' + vin);
+      error.response && this.log.debug(JSON.stringify(error.response.data));
+      await this.setState(vin + '.remote.lastError', message, true);
+    }
+    this.schedulePoll(20 * 1000);
+    return accepted;
+  }
+
+  /**
+   * @param {string} vin
+   * @param {string} message
+   */
+  async reportCommandError(vin, message) {
+    this.log.warn(message + ' (' + vin + ')');
+    await this.setState(vin + '.remote.lastError', message, true);
   }
 }
 

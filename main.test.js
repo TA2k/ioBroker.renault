@@ -910,3 +910,196 @@ describe('vehicle list', () => {
     expect(second.clearInterval.calledWith(second.intervals.find((timer) => timer.ms === DAY))).to.equal(true);
   });
 });
+
+describe('commands', () => {
+  async function ready(routes = {}) {
+    const adapter = setup(routes);
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+  const posts = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .filter((request) => request.method === 'post');
+  /** Like js-controller: store the user value unacknowledged, then call the handler. */
+  const write = async (adapter, path, val) => {
+    const id = 'renault.0.VIN1.remote.' + path;
+    await adapter.setState(id, val, false);
+    await adapter.onStateChange(id, userWrite(val));
+  };
+
+  const cases = [
+    [
+      'actions/hvac-start',
+      true,
+      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/hvac-start?',
+      { type: 'HvacStart', attributes: { action: 'start', targetTemperature: 21 } },
+    ],
+    [
+      'actions/hvac-start',
+      false,
+      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/hvac-start?',
+      { type: 'HvacStart', attributes: { action: 'cancel' } },
+    ],
+    [
+      'actions/charging-start',
+      true,
+      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charging-start?',
+      { type: 'ChargingStart', attributes: { action: 'start' } },
+    ],
+    [
+      'actions/charging-start',
+      false,
+      '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charging-start?',
+      { type: 'ChargingStart', attributes: { action: 'stop' } },
+    ],
+    [
+      'charge/pause-resume',
+      true,
+      '/kamereon/kcm/v1/vehicles/VIN1/charge/pause-resume?',
+      { type: 'ChargePauseResume', attributes: { action: 'resume' } },
+    ],
+    [
+      'charge/pause-resume',
+      false,
+      '/kamereon/kcm/v1/vehicles/VIN1/charge/pause-resume?',
+      { type: 'ChargePauseResume', attributes: { action: 'pause' } },
+    ],
+    ['charge/start', true, '/kamereon/kcm/v1/vehicles/VIN1/charge/start?', { type: 'ChargingStart', attributes: { action: 'start' } }],
+  ];
+  for (const [path, val, url, body] of cases) {
+    it(`sends ${path} = ${val} and confirms it`, async () => {
+      const adapter = await ready();
+      await write(adapter, path, val);
+      expect(posts(adapter)).to.have.length(1);
+      expect(posts(adapter)[0].url)
+        .to.include(url)
+        .and.to.match(/country=de$/);
+      expect(posts(adapter)[0].data).to.deep.equal({ data: body });
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(val);
+      expect(adapter.acks['VIN1.remote.' + path]).to.equal(true);
+      expect(adapter.states['VIN1.remote.lastError']).to.equal('');
+      expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
+    });
+  }
+
+  it('sends nothing for charge/start = false', async () => {
+    const adapter = await ready();
+    await write(adapter, 'charge/start', false);
+    expect(posts(adapter)).to.deep.equal([]);
+    expect(adapter.states['VIN1.remote.lastError']).to.include('charge/start');
+  });
+
+  for (const val of ['true', 1, null]) {
+    it(`rejects the non-boolean command value ${JSON.stringify(val)}`, async () => {
+      const adapter = await ready();
+      await write(adapter, 'actions/charging-start', val);
+      expect(posts(adapter)).to.deep.equal([]);
+      expect(adapter.states['VIN1.remote.lastError']).to.include('true or false');
+    });
+  }
+
+  it('records a failed command and leaves it unconfirmed', async () => {
+    const error = httpError(403, {}, { errors: [{ errorCode: 'err.func.wired.forbidden' }] });
+    const adapter = await ready({ '/actions/charging-start': error });
+    await write(adapter, 'actions/charging-start', true);
+    expect(adapter.acks['VIN1.remote.actions/charging-start']).to.equal(false);
+    expect(adapter.states['VIN1.remote.lastError']).to.include('actions/charging-start').and.to.include('err.func.wired.forbidden');
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
+  });
+
+  for (const temperature of [NaN, 'abc', 0, -1, Infinity, '21']) {
+    it(`does not start the climate control with target temperature ${String(temperature)}`, async () => {
+      const adapter = await ready();
+      adapter.states['VIN1.remote.hvac-temperature'] = temperature;
+      await write(adapter, 'actions/hvac-start', true);
+      expect(posts(adapter)).to.deep.equal([]);
+      expect(adapter.states['VIN1.remote.lastError']).to.include('hvac-temperature');
+    });
+  }
+
+  for (const temperature of [0.1, 21, 30]) {
+    it(`starts the climate control with target temperature ${temperature}`, async () => {
+      const adapter = await ready();
+      adapter.states['VIN1.remote.hvac-temperature'] = temperature;
+      await write(adapter, 'actions/hvac-start', true);
+      expect(posts(adapter)[0].data.data.attributes.targetTemperature).to.equal(temperature);
+    });
+  }
+
+  it('does not check the temperature when the climate control is stopped', async () => {
+    const adapter = await ready();
+    adapter.states['VIN1.remote.hvac-temperature'] = NaN;
+    await write(adapter, 'actions/hvac-start', false);
+    expect(posts(adapter)).to.have.length(1);
+  });
+
+  it('confirms a valid target temperature and rejects an invalid one', async () => {
+    const adapter = await ready();
+    await write(adapter, 'hvac-temperature', 22);
+    expect(adapter.acks['VIN1.remote.hvac-temperature']).to.equal(true);
+    await write(adapter, 'hvac-temperature', 0);
+    expect(adapter.acks['VIN1.remote.hvac-temperature']).to.equal(false);
+    expect(logged(adapter.log.warn).some((line) => line.includes('hvac-temperature'))).to.equal(true);
+    expect(posts(adapter)).to.deep.equal([]);
+  });
+
+  for (const id of [
+    'renault.0.VIN1.remote.unknown',
+    'renault.0.VIN1.remote.lastError',
+    'renault.0.VIN1.remote.toString',
+    'renault.0.VIN1.general.vin',
+    'renault.0.OTHER.remote.actions/charging-start',
+  ]) {
+    it(`sends nothing for a write to ${id}`, async () => {
+      const adapter = await ready();
+      await adapter.onStateChange(id, userWrite(true));
+      expect(posts(adapter)).to.deep.equal([]);
+    });
+  }
+
+  it('ignores acknowledged values', async () => {
+    const adapter = await ready();
+    await adapter.onStateChange(
+      'renault.0.VIN1.remote.actions/charging-start',
+      /** @type {ioBroker.State} */ (/** @type {unknown} */ ({ val: true, ack: true })),
+    );
+    expect(posts(adapter)).to.deep.equal([]);
+  });
+});
+
+describe('remote objects', () => {
+  const common = (adapter, id) => adapter.objects.get('renault.0.VIN1.remote.' + id)?.common;
+
+  it('creates the remote states with roles that match their use', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    for (const id of ['actions/hvac-start', 'actions/charging-start', 'charge/pause-resume']) {
+      expect(common(adapter, id)).to.include({ type: 'boolean', role: 'switch', read: true, write: true });
+    }
+    expect(common(adapter, 'hvac-temperature')).to.include({
+      type: 'number',
+      role: 'level.temperature',
+      unit: '°C',
+      read: true,
+      write: true,
+    });
+    expect(common(adapter, 'charge/start')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
+    expect(common(adapter, 'refresh')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
+    expect(common(adapter, 'lastError')).to.include({ type: 'string', role: 'text', read: true, write: false });
+  });
+
+  it('updates states created by older versions', async () => {
+    const adapter = setup();
+    adapter.objects.set('renault.0.VIN1.remote.actions/hvac-start', {
+      _id: 'renault.0.VIN1.remote.actions/hvac-start',
+      type: 'state',
+      common: { name: 'True = Start, False = Stop', type: 'boolean', role: 'button', read: true, write: true },
+      native: {},
+    });
+    await adapter.onReady();
+    expect(common(adapter, 'actions/hvac-start')).to.include({ role: 'switch' });
+  });
+});
