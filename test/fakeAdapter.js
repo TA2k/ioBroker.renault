@@ -69,6 +69,10 @@ class FakeAdapter extends EventEmitter {
     return Promise.resolve();
   }
 
+  getObjectAsync(id) {
+    return Promise.resolve(this.objects.get(this.fullId(id)) ?? null);
+  }
+
   setObjectNotExistsAsync(id, object) {
     const key = this.fullId(id);
     if (!this.objects.has(key)) {

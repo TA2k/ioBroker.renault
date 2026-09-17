@@ -95,16 +95,36 @@ const KCM = 'kcm/v1/vehicles/';
 
 /**
  * Boolean remote commands, keyed by the state below <vin>.remote. The bodies follow renault-api;
- * body() returns null when the value has no endpoint.
+ * body() returns null when the value has no endpoint. State ids carry no "/", which the object
+ * structure check of the repositories bot warns about (W3001).
  *
  * @type {Record<string, RemoteCommand>}
  */
 const REMOTE_COMMANDS = {
-  'actions/hvac-start': { base: KCA, body: (on) => ({ type: 'HvacStart', attributes: { action: on ? 'start' : 'cancel' } }) },
-  'actions/charging-start': { base: KCA, body: (on) => ({ type: 'ChargingStart', attributes: { action: on ? 'start' : 'stop' } }) },
-  'charge/pause-resume': { base: KCM, body: (on) => ({ type: 'ChargePauseResume', attributes: { action: on ? 'resume' : 'pause' } }) },
-  'charge/start': { base: KCM, body: (on) => (on ? { type: 'ChargingStart', attributes: { action: 'start' } } : null) },
+  'hvac-start': {
+    base: KCA,
+    endpoint: 'actions/hvac-start',
+    body: (on) => ({ type: 'HvacStart', attributes: { action: on ? 'start' : 'cancel' } }),
+  },
+  'charging-start': {
+    base: KCA,
+    endpoint: 'actions/charging-start',
+    body: (on) => ({ type: 'ChargingStart', attributes: { action: on ? 'start' : 'stop' } }),
+  },
+  'charge-pause-resume': {
+    base: KCM,
+    endpoint: 'charge/pause-resume',
+    body: (on) => ({ type: 'ChargePauseResume', attributes: { action: on ? 'resume' : 'pause' } }),
+  },
+  'charge-start': {
+    base: KCM,
+    endpoint: 'charge/start',
+    body: (on) => (on ? { type: 'ChargingStart', attributes: { action: 'start' } } : null),
+  },
 };
+
+/** Remote state ids of versions before 1.0.0, removed once per vehicle. */
+const LEGACY_REMOTE_IDS = ['actions/hvac-start', 'actions/charging-start', 'charge/pause-resume', 'charge/start'];
 
 /**
  * No source (renault-api, Home Assistant, ZoePHP) documents a range; like Home Assistant, only a
@@ -511,14 +531,21 @@ class Renault extends utils.Adapter {
           });
 
           const remoteObjects = [
-            { id: 'actions/hvac-start', name: 'Climate control: true = start, false = stop', type: 'boolean', role: 'switch' },
+            { id: 'hvac-start', name: 'Climate control: true = start, false = stop', type: 'boolean', role: 'switch' },
             { id: 'hvac-temperature', name: 'Climate control target temperature', type: 'number', role: 'level.temperature', unit: '°C' },
-            { id: 'actions/charging-start', name: 'Charging: true = start, false = stop', type: 'boolean', role: 'switch' },
-            { id: 'charge/pause-resume', name: 'Charging: true = resume, false = pause', type: 'boolean', role: 'switch' },
-            { id: 'charge/start', name: 'Start charging (KCM vehicles)', type: 'boolean', role: 'button.start', read: false },
+            { id: 'charging-start', name: 'Charging: true = start, false = stop', type: 'boolean', role: 'switch' },
+            { id: 'charge-pause-resume', name: 'Charging: true = resume, false = pause', type: 'boolean', role: 'switch' },
+            { id: 'charge-start', name: 'Start charging (KCM vehicles)', type: 'boolean', role: 'button.start', read: false },
             { id: 'refresh', name: 'Refresh vehicle data', type: 'boolean', role: 'button', read: false },
             { id: 'lastError', name: 'Error of the last command, empty after a success', type: 'string', role: 'text', write: false },
           ];
+          for (const legacy of LEGACY_REMOTE_IDS) {
+            const legacyId = device.vin + '.remote.' + legacy;
+            if (await this.getObjectAsync(legacyId)) {
+              await this.delObjectAsync(legacyId);
+              this.log.info('Removed ' + legacyId + ', the command is now ' + legacy.replace(/^actions\//, '').replace('/', '-'));
+            }
+          }
           for (const remote of remoteObjects) {
             // extendObject, so installations of older versions get the new roles too
             await this.extendObjectAsync(device.vin + '.remote.' + remote.id, {
@@ -1112,7 +1139,7 @@ class Renault extends utils.Adapter {
       await this.reportCommandError(vin, path + ' does not support ' + state.val + '. Nothing sent');
       return;
     }
-    if (path === 'actions/hvac-start' && state.val) {
+    if (path === 'hvac-start' && state.val) {
       const temperature = (await this.getStateAsync(vin + '.remote.hvac-temperature'))?.val ?? 21;
       if (!isValidTemperature(temperature)) {
         await this.reportCommandError(

@@ -28,15 +28,15 @@ This adapter connects ioBroker to the My Renault / My Dacia / My Alpine cloud an
 
 Each vehicle is created as a device using its VIN. Remote commands are exposed as states under `renault.0.<VIN>.remote.*`:
 
-| State                    | Type    | Role                | Action                                                           |
-| ------------------------ | ------- | ------------------- | ---------------------------------------------------------------- |
-| `actions/hvac-start`     | boolean | `switch`            | `true` = start, `false` = stop climate control                   |
-| `hvac-temperature`       | number  | `level.temperature` | target temperature in °C for the next start (default 21)         |
-| `actions/charging-start` | boolean | `switch`            | `true` = start, `false` = stop charging                          |
-| `charge/pause-resume`    | boolean | `switch`            | `true` = resume, `false` = pause charging (KCM vehicles)         |
-| `charge/start`           | boolean | `button.start`      | `true` = start charging (KCM vehicles); `false` is not supported |
-| `refresh`                | boolean | `button`            | `true` = poll the vehicle data now                               |
-| `lastError`              | string  | `text`              | error of the last command, empty after a successful command      |
+| State                 | Type    | Role                | Action                                                           |
+| --------------------- | ------- | ------------------- | ---------------------------------------------------------------- |
+| `hvac-start`          | boolean | `switch`            | `true` = start, `false` = stop climate control                   |
+| `hvac-temperature`    | number  | `level.temperature` | target temperature in °C for the next start (default 21)         |
+| `charging-start`      | boolean | `switch`            | `true` = start, `false` = stop charging                          |
+| `charge-pause-resume` | boolean | `switch`            | `true` = resume, `false` = pause charging (KCM vehicles)         |
+| `charge-start`        | boolean | `button.start`      | `true` = start charging (KCM vehicles); `false` is not supported |
+| `refresh`             | boolean | `button`            | `true` = poll the vehicle data now                               |
+| `lastError`           | string  | `text`              | error of the last command, empty after a successful command      |
 
 A command state is set to the written value with `ack: true` once the Renault cloud accepted the
 command. The car carries it out afterwards; the data states show the result after the next poll.
@@ -54,6 +54,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) breaking: the command states are renamed to `hvac-start`, `charging-start`, `charge-pause-resume` and `charge-start` (object ids without "/"); the old states are removed, scripts and visualizations need the new names
 - (typhosj) breaking: battery, range, mileage, fuel and temperature states get units and specific roles, and data states are read-only
 - (typhosj) breaking: the command states use the roles switch, button.start and level.temperature instead of button and value
 - (typhosj) commands are confirmed with ack after the cloud accepted them, and errors are written to remote.lastError; stop charging sends "stop", charge/start uses the KCM endpoint

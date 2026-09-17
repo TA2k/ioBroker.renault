@@ -37,7 +37,7 @@ async function buildDump() {
   const adapter = createTestAdapter(fixtureRoutes());
   adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
   await adapter.onReady();
-  await adapter.onStateChange('renault.0.VIN1.remote.actions/charging-start', /** @type {any} */ ({ val: true, ack: false }));
+  await adapter.onStateChange('renault.0.VIN1.remote.charging-start', /** @type {any} */ ({ val: true, ack: false }));
 
   /** @type {Record<string, any>} */
   const dump = {};
