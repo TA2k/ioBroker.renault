@@ -197,6 +197,7 @@ class Renault extends utils.Adapter {
    */
   async connectAndPoll() {
     if ((await this.login()) && (await this.getDeviceList())) {
+      this.startAttempt = 0;
       await this.migrateChargeHistoryV1();
       await this.runPoll();
       this.refreshTokenInterval = this.setInterval(() => {
@@ -211,7 +212,7 @@ class Renault extends utils.Adapter {
     const delayMinutes = Math.min(5 * 2 ** this.startAttempt, 60);
     this.startAttempt++;
     this.log.warn('Connection to the Renault cloud failed. Next attempt in ' + delayMinutes + ' minutes');
-    this.setTimeout(
+    this.reLoginTimeout = this.setTimeout(
       () => this.connectAndPoll().catch((error) => this.log.error('Connection attempt failed: ' + error)),
       delayMinutes * 60 * 1000,
     );
@@ -772,48 +773,71 @@ class Renault extends utils.Adapter {
         ' minutes. Raise the update interval if this repeats.',
     );
   }
+  /**
+   * Get a new id token with the login session.
+   *
+   * @returns {Promise<boolean>} true when a new id token was obtained
+   */
   async refreshToken() {
     if (!this.session_data) {
-      this.log.error('No session found relogin');
-      await this.login();
-      return;
+      this.log.warn('No login session, logging in again');
+      this.reconnect(0);
+      return false;
     }
-    await this.requestClient({
-      method: 'post',
-      url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
-      headers: {
-        'User-Agent': this.userAgent,
-        Accept: '*/*',
-        'Accept-Language': this.locale.toLowerCase(),
-        'Cache-Control': 'no-cache',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      data: qs.stringify({
-        format: 'json',
-        login_token: this.session_data.cookieValue,
-        sdk: 'js_latest',
-        fields: 'data.personId,data.gigyaDataCenter',
-        apikey: this.apiKey,
-        expiration: '3600',
-      }),
-    })
-      .then((res) => {
-        this.session = res.data;
-        this.setState('info.connection', true, true);
-      })
-      .catch((error) => {
-        this.setState('info.connection', false, true);
-        this.log.error('refresh token failed: ' + error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
-        this.log.error('Start relogin in 1min');
-        this.reLoginTimeout = this.setTimeout(
-          () => {
-            this.login();
-          },
-          1000 * 60 * 1,
-        );
+    try {
+      const res = await this.requestClient({
+        method: 'post',
+        url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
+        headers: {
+          'User-Agent': this.userAgent,
+          Accept: '*/*',
+          'Accept-Language': this.locale.toLowerCase(),
+          'Cache-Control': 'no-cache',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        data: qs.stringify({
+          format: 'json',
+          login_token: this.session_data.cookieValue,
+          sdk: 'js_latest',
+          fields: 'data.personId,data.gigyaDataCenter',
+          apikey: this.apiKey,
+          expiration: '3600',
+        }),
       });
+      // Gigya answers 200 with an errorCode body when the session is no longer valid.
+      if (!res.data?.id_token) {
+        throw new Error('no id token in the answer' + (res.data?.errorCode ? ' (error ' + res.data.errorCode + ')' : ''));
+      }
+      this.session = res.data;
+      this.setState('info.connection', true, true);
+      return true;
+    } catch (error) {
+      this.setState('info.connection', false, true);
+      this.log.error('Token refresh failed: ' + error + '. Logging in again in 1 minute');
+      error.response && this.log.error(JSON.stringify(error.response.data));
+      this.reconnect(60 * 1000);
+      return false;
+    }
   }
+
+  /**
+   * Stop polling and token refresh, then log in again after delayMs. connectAndPoll() restarts both
+   * and owns the backoff, and it stops for good after a rejected login.
+   *
+   * @param {number} delayMs
+   */
+  reconnect(delayMs) {
+    this.pollTimeout && this.clearTimeout(this.pollTimeout);
+    this.pollTimeout = null;
+    this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
+    this.refreshTokenInterval = null;
+    this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
+    this.reLoginTimeout = this.setTimeout(
+      () => this.connectAndPoll().catch((error) => this.log.error('Connection attempt failed: ' + error)),
+      delayMs,
+    );
+  }
+
   toCamelCase(string) {
     if (!string) {
       return;

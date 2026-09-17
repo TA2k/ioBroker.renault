@@ -467,3 +467,89 @@ describe('request quota', () => {
     expect(adapter.timeouts.at(-1)?.ms).to.equal(60 * 60 * 1000);
   });
 });
+
+describe('relogin', () => {
+  async function connected() {
+    const adapter = setup();
+    await adapter.onReady();
+    return adapter;
+  }
+  const failRefresh = (adapter, routes = {}) => {
+    adapter.requestClient = setup({ 'accounts.getJWT': httpError(500), ...routes }).requestClient;
+  };
+
+  it('stops polling and logs in again one minute after a failed refresh', async () => {
+    const adapter = await connected();
+    const poll = adapter.pollTimeout;
+    const refresh = adapter.refreshTokenInterval;
+    failRefresh(adapter);
+    expect(await adapter.refreshToken()).to.equal(false);
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(60 * 1000);
+    expect(adapter.pollTimeout).to.equal(null);
+    expect(adapter.clearTimeout.calledWith(poll)).to.equal(true);
+    expect(adapter.clearInterval.calledWith(refresh)).to.equal(true);
+  });
+
+  it('keeps retrying with backoff when the relogin fails too', async () => {
+    const adapter = await connected();
+    failRefresh(adapter, { 'accounts.login': new Error('ECONNRESET') });
+    await adapter.refreshToken();
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(5 * 60 * 1000);
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(10 * 60 * 1000);
+    expect(adapter.states['info.connection']).to.equal(false);
+  });
+
+  it('stops after a relogin the account service rejected', async () => {
+    const adapter = await connected();
+    failRefresh(adapter, { 'accounts.login': { errorCode: 403042, errorMessage: 'Invalid LoginID' } });
+    await adapter.refreshToken();
+    const count = adapter.timeouts.length;
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.timeouts).to.have.length(count);
+    expect(logged(adapter.log.error).some((line) => line.includes('Check email and password'))).to.equal(true);
+  });
+
+  it('runs exactly one poll timer and one refresh interval after a successful relogin', async () => {
+    const adapter = await connected();
+    const refresh = adapter.refreshTokenInterval;
+    failRefresh(adapter);
+    await adapter.refreshToken();
+    adapter.requestClient = setup().requestClient;
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.pollTimeout).to.not.equal(null);
+    expect(adapter.refreshTokenInterval).to.not.equal(refresh);
+    const live = adapter.intervals.filter((timer) => timer.ms === 3500 * 1000 && !adapter.clearInterval.calledWith(timer));
+    expect(live).to.have.length(1);
+    expect(adapter.states['info.connection']).to.equal(true);
+  });
+
+  it('starts the backoff at 5 minutes again after a successful relogin', async () => {
+    const adapter = setup({ '/vehicles?': httpError(503) });
+    await adapter.onReady();
+    adapter.requestClient = setup().requestClient;
+    await adapter.timeouts.at(-1)?.fn();
+    failRefresh(adapter, { 'accounts.login': new Error('ECONNRESET') });
+    await adapter.refreshToken();
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(5 * 60 * 1000);
+  });
+
+  it('treats an answer without id token as a failed refresh', async () => {
+    const adapter = await connected();
+    adapter.requestClient = setup({ 'accounts.getJWT': { errorCode: 403005, errorMessage: 'Unauthorized user' } }).requestClient;
+    expect(await adapter.refreshToken()).to.equal(false);
+    expect(adapter.states['info.connection']).to.equal(false);
+    expect(adapter.session.id_token).to.equal('ID_TOKEN');
+  });
+
+  it('logs in again at once when there is no session', async () => {
+    const adapter = await connected();
+    adapter.session_data = undefined;
+    adapter.requestClient.resetHistory();
+    expect(await adapter.refreshToken()).to.equal(false);
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(0);
+    expect(adapter.requestClient.called).to.equal(false);
+  });
+});
