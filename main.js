@@ -85,6 +85,8 @@ class Renault extends utils.Adapter {
     this.accountTypes = [];
     /** @type {ioBroker.Interval | undefined | null} */
     this.refreshTokenInterval = null;
+    /** @type {ioBroker.Interval | undefined | null} */
+    this.vehicleListInterval = null;
     /** @type {ioBroker.Timeout | undefined | null} */
     this.pollTimeout = null;
     this.polling = false;
@@ -212,6 +214,8 @@ class Renault extends utils.Adapter {
       this.refreshTokenInterval = this.setInterval(() => {
         this.refreshToken();
       }, 3500 * 1000);
+      // getDeviceList() catches its own errors
+      this.vehicleListInterval = this.setInterval(() => this.getDeviceList(), DAY_MS);
       return;
     }
     if (this.loginRejected) {
@@ -420,9 +424,12 @@ class Renault extends utils.Adapter {
       .then(async (res) => {
         this.log.debug(JSON.stringify(res.data));
 
-        this.deviceArray = [];
+        const vins = [];
         for (const device of res.data.vehicleLinks) {
-          this.deviceArray.push(device.vin);
+          vins.push(device.vin);
+          if (this.deviceArray.length && !this.deviceArray.includes(device.vin)) {
+            this.log.info('New vehicle ' + device.vin + ' found, polling it from now on');
+          }
           let name = device.vehicleDetails?.modelSCR || device.brand;
           if (device.vehicleDetails?.model?.label) {
             name += device.vehicleDetails.model.label;
@@ -441,13 +448,6 @@ class Renault extends utils.Adapter {
             type: 'channel',
             common: {
               name: 'Remote Controls',
-            },
-            native: {},
-          });
-          await this.setObjectNotExistsAsync(device.vin + '.general', {
-            type: 'channel',
-            common: {
-              name: 'WIRD NICHT AKTUALISIERT',
             },
             native: {},
           });
@@ -479,8 +479,9 @@ class Renault extends utils.Adapter {
             });
           });
           delete device.mileage;
-          this.json2iob.parse(device.vin + '.general', device);
+          await this.json2iob.parse(device.vin + '.general', device, { channelName: 'Vehicle details' });
         }
+        this.deviceArray = vins;
         return true;
       })
       .catch((error) => {
@@ -977,6 +978,8 @@ class Renault extends utils.Adapter {
     this.pollTimeout = null;
     this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
     this.refreshTokenInterval = null;
+    this.vehicleListInterval && this.clearInterval(this.vehicleListInterval);
+    this.vehicleListInterval = null;
     this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
     this.reLoginTimeout = this.setTimeout(
       () => this.connectAndPoll().catch((error) => this.log.error('Connection attempt failed: ' + error)),
@@ -1005,6 +1008,7 @@ class Renault extends utils.Adapter {
       this.pollTimeout && this.clearTimeout(this.pollTimeout);
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
+      this.vehicleListInterval && this.clearInterval(this.vehicleListInterval);
       callback();
     } catch (e) {
       this.log.error('Error onUnload: ' + e);

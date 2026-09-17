@@ -38,7 +38,7 @@ describe('startup', () => {
     expect(urls(adapter).some((url) => url.includes('/cars/VIN1/battery-status'))).to.equal(true);
     expect(adapter.states['info.connection']).to.equal(true);
     expect(adapter.timeouts.map((timer) => timer.ms)).to.deep.equal([adapter.config.interval * 60 * 1000]);
-    expect(adapter.intervals.map((timer) => timer.ms)).to.deep.equal([3500 * 1000]);
+    expect(adapter.intervals.map((timer) => timer.ms)).to.deep.equal([3500 * 1000, DAY]);
   });
 
   it('retries with growing, capped delay when the cloud is unreachable', async () => {
@@ -854,5 +854,59 @@ describe('cockpit version', () => {
   it('declares the marker state', () => {
     const object = require('./io-package.json').instanceObjects.find((entry) => entry._id === 'info.cockpitVersion');
     expect(object?.common).to.include({ type: 'string', role: 'json', read: true, write: false, def: '{}' });
+  });
+});
+
+describe('vehicle list', () => {
+  const TWO = { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] };
+
+  it('reloads the vehicle list every 24 hours and polls a new vehicle', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    const reload = adapter.intervals.find((timer) => timer.ms === DAY);
+    expect(reload).to.not.equal(undefined);
+    adapter.requestClient = setup({ '/vehicles?': TWO }).requestClient;
+    await reload?.fn();
+    expect(adapter.deviceArray).to.deep.equal(['VIN1', 'VIN2']);
+    expect(logged(adapter.log.info).some((line) => line.includes('New vehicle VIN2'))).to.equal(true);
+    await adapter.updateDevices();
+    expect(urls(adapter).some((url) => url.includes('/cars/VIN2/battery-status'))).to.equal(true);
+  });
+
+  it('stops polling a vehicle that left the account', async () => {
+    const adapter = setup({ '/vehicles?': TWO });
+    await adapter.onReady();
+    adapter.requestClient = setup().requestClient;
+    await adapter.getDeviceList();
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes('VIN2'))).to.deep.equal([]);
+  });
+
+  it('keeps the known vehicles when the reload fails', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.requestClient = setup({ '/vehicles?': httpError(503) }).requestClient;
+    expect(await adapter.getDeviceList()).to.equal(false);
+    expect(adapter.deviceArray).to.deep.equal(['VIN1']);
+  });
+
+  it('names the details channel in English', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    expect(adapter.json2iob.parse.calledWith('VIN1.general', sinon.match.object, sinon.match({ channelName: 'Vehicle details' }))).to.equal(
+      true,
+    );
+  });
+
+  it('stops the reload on unload and on reconnect', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    const reload = adapter.intervals.find((timer) => timer.ms === DAY);
+    adapter.reconnect(0);
+    expect(adapter.clearInterval.calledWith(reload)).to.equal(true);
+    const second = setup();
+    await second.onReady();
+    second.onUnload(() => {});
+    expect(second.clearInterval.calledWith(second.intervals.find((timer) => timer.ms === DAY))).to.equal(true);
   });
 });

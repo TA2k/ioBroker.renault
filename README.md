@@ -52,6 +52,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
 - (typhosj) breaking: only one cockpit version is polled per vehicle (v2 if it answers); the channel of the other version (cockpit or cockpitv2) is deleted once
 - (typhosj) an endpoint the car rejected is asked again once a day, so a temporary 403 no longer disables it until restart
 - (typhosj) the charge history is fetched once per hour instead of on every poll, and the adapter warns once when its requests exceed Renault's quota of about 60 per hour
