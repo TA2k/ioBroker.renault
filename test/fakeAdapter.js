@@ -125,7 +125,13 @@ const createRenault = require('../main.js');
 const ACCOUNT = { accountId: 'acc-1', accountType: 'MYRENAULT', accountStatus: 'ACTIVE' };
 const VEHICLE = { vin: 'VIN1', brand: 'RENAULT', vehicleDetails: { modelSCR: 'ZOE', model: { label: ' R135' } } };
 
-/** Build an HTTP error shaped like an axios error. */
+/**
+ * Build an HTTP error shaped like an axios error.
+ *
+ * @param {number} status
+ * @param {Record<string, unknown>} [config]
+ * @param {unknown} [data]
+ */
 function httpError(status, config = {}, data = { status }) {
   const error = new Error('Request failed with status code ' + status);
   Object.assign(error, { response: { status, data }, config });

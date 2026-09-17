@@ -50,6 +50,9 @@ const KAMEREON_KEY_URL = 'https://raw.githubusercontent.com/hacf-fr/renault-api/
 const BUNDLED_KAMEREON_KEY = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
 const KAMEREON_KEY = /^[A-Za-z0-9]{20,64}$/;
 const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
+const QUOTA_PAUSE_MINUTES = [15, 30, 60];
+
+/** @typedef {{ path: string, url: string, desc: string, isHistory?: boolean }} Endpoint */
 
 class Renault extends utils.Adapter {
   /**
@@ -84,6 +87,8 @@ class Renault extends utils.Adapter {
     this.apiKeyUpdate = BUNDLED_KAMEREON_KEY;
     this.country = 'de';
     this.locale = 'de-DE';
+    this.quotaStrikes = 0;
+    this.quotaPausedUntil = 0;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -217,8 +222,13 @@ class Renault extends utils.Adapter {
    * pollNow() skips a poll that would overlap.
    */
   async runPoll() {
-    this.schedulePoll(this.config.interval * 60 * 1000);
+    const intervalMs = this.config.interval * 60 * 1000;
+    this.schedulePoll(intervalMs);
     await this.pollNow();
+    const pauseMs = this.quotaPausedUntil - Date.now();
+    if (pauseMs > 0) {
+      this.schedulePoll(Math.max(pauseMs, intervalMs));
+    }
   }
 
   /**
@@ -499,11 +509,16 @@ class Renault extends utils.Adapter {
       this.log.error('No accountId found');
       return;
     }
+    if (Date.now() < this.quotaPausedUntil) {
+      this.log.debug('Poll skipped during the request quota pause');
+      return;
+    }
     const curDate = new Date().toISOString().split('T')[0];
     // Charge history: limit start date to ~1 year back (My Renault app paginates yearly).
     // Keeping the range bounded prevents the API from returning years of data on every poll.
     const historyStart = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
+    /** @type {Endpoint[]} */
     const statusArray = [
       {
         path: 'battery-status',
@@ -651,84 +666,111 @@ class Renault extends utils.Adapter {
         if (this.ignoreState[vin] && this.ignoreState[vin].includes(element.path)) {
           continue;
         }
-        const url = element.url.replace('$vin', vin);
-
-        await this.requestClient({
-          method: 'get',
-          url: url,
-          headers: { ...headers, 'X-Amzn-Trace-Id': this.buildTraceId() },
-        })
-          .then(async (res) => {
-            this.log.debug(JSON.stringify(res.data));
-            if (!res.data) {
-              return;
-            }
-            let data = res.data;
-            if (res.data.data && res.data.data.attributes) {
-              data = res.data.data.attributes;
-            }
-
-            /** @type {boolean | undefined} */
-            let forceIndex = undefined;
-            const preferedArrayName = undefined;
-
-            // Charge history endpoints return arrays keyed by date — without forceIndex
-            // json2iob creates a new channel per date and never cleans them up. Cap to the
-            // configured limit (default 100, matches the My Renault app pagination) and use
-            // numeric indices so old entries are overwritten on each poll. The one-shot
-            // migrateChargeHistoryV1() removes the legacy date-named channels on first start.
-            if (element.isHistory) {
-              forceIndex = true;
-              const arrayKey = element.path === 'charge-history' ? 'chargeSummaries' : 'charges';
-              const limit = Number(this.config.chargeHistoryLimit);
-              const cap = Number.isFinite(limit) && limit > 0 ? limit : 0;
-              if (cap > 0 && data && Array.isArray(data[arrayKey]) && data[arrayKey].length > cap) {
-                data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
-              }
-            }
-
-            this.json2iob.parse(vin + '.' + element.path, data, {
-              forceIndex: forceIndex,
-              preferedArrayName: preferedArrayName,
-              channelName: element.desc,
-            });
-          })
-          .catch((error) => {
-            if (error.response) {
-              if (error.response.status === 401) {
-                error.response && this.log.debug(JSON.stringify(error.response.data));
-                this.log.info(element.path + ' receive 401 error. Refresh Token in 60 seconds');
-                this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
-                this.refreshTokenTimeout = this.setTimeout(() => {
-                  this.refreshToken();
-                }, 1000 * 60);
-
-                return;
-              }
-              if (this.firstUpdate) {
-                if (error.response.status === 400 || error.response.status === 403 || error.response.status === 404) {
-                  if (!this.ignoreState[vin]) {
-                    this.ignoreState[vin] = [];
-                  }
-                  this.ignoreState[vin].push(element.path);
-                  this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for updates.');
-                  this.log.debug(String(error));
-                  error.response && this.log.debug(JSON.stringify(error.response.data));
-                  return;
-                }
-              }
-            }
-            if (error.response && error.response.status >= 500) {
-              this.log.warn(`Renault Server error: ${error.response.status} `);
-              return;
-            }
-            this.log.error(url);
-            this.log.error(String(error));
-            error.response && this.log.error(JSON.stringify(error.response.data));
-          });
+        const outcome = await this.pollEndpoint(vin, element, headers);
+        if (outcome === 'quota') {
+          this.pauseForQuota();
+          return;
+        }
       }
     }
+    this.quotaStrikes = 0;
     this.firstUpdate = false;
+  }
+
+  /**
+   * Fetch one endpoint for one vehicle and write the answer.
+   *
+   * @param {string} vin
+   * @param {Endpoint} element
+   * @param {Record<string, string>} headers
+   * @returns {Promise<'ok' | 'quota' | 'failed'>}
+   */
+  async pollEndpoint(vin, element, headers) {
+    let res;
+    try {
+      res = await this.requestClient({
+        method: 'get',
+        url: element.url.replace('$vin', vin),
+        headers: { ...headers, 'X-Amzn-Trace-Id': this.buildTraceId() },
+      });
+    } catch (error) {
+      return this.handlePollError(vin, element, error);
+    }
+    this.log.debug(JSON.stringify(res.data));
+    if (!res.data) {
+      return 'ok';
+    }
+    let data = res.data;
+    if (res.data.data && res.data.data.attributes) {
+      data = res.data.data.attributes;
+    }
+    /** @type {boolean | undefined} */
+    let forceIndex = undefined;
+    // Charge history endpoints return arrays keyed by date. Without forceIndex json2iob creates a
+    // channel per date and never removes it. Cap to the configured limit and use numeric indices,
+    // so old entries are overwritten. migrateChargeHistoryV1() removed the date-named channels.
+    if (element.isHistory) {
+      forceIndex = true;
+      const arrayKey = element.path === 'charge-history' ? 'chargeSummaries' : 'charges';
+      const limit = Number(this.config.chargeHistoryLimit);
+      const cap = Number.isFinite(limit) && limit > 0 ? limit : 0;
+      if (cap > 0 && data && Array.isArray(data[arrayKey]) && data[arrayKey].length > cap) {
+        data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
+      }
+    }
+    await this.json2iob.parse(vin + '.' + element.path, data, { forceIndex, channelName: element.desc });
+    return 'ok';
+  }
+
+  /**
+   * @param {string} vin
+   * @param {Endpoint} element
+   * @param {any} error
+   * @returns {'quota' | 'failed'}
+   */
+  handlePollError(vin, element, error) {
+    const status = error.response?.status;
+    if (status === 429 || JSON.stringify(error.response?.data ?? '').includes('err.func.wired.overloaded')) {
+      return 'quota';
+    }
+    if (status === 401) {
+      this.log.debug(JSON.stringify(error.response.data));
+      this.log.info(element.path + ' receive 401 error. Refresh Token in 60 seconds');
+      this.refreshTokenTimeout && this.clearTimeout(this.refreshTokenTimeout);
+      this.refreshTokenTimeout = this.setTimeout(() => {
+        this.refreshToken();
+      }, 1000 * 60);
+      return 'failed';
+    }
+    if (this.firstUpdate && (status === 400 || status === 403 || status === 404)) {
+      if (!this.ignoreState[vin]) {
+        this.ignoreState[vin] = [];
+      }
+      this.ignoreState[vin].push(element.path);
+      this.log.info('Feature not found for ' + vin + '. Ignore ' + element.path + ' for updates.');
+      this.log.debug(String(error));
+      this.log.debug(JSON.stringify(error.response.data));
+      return 'failed';
+    }
+    if (status >= 500) {
+      this.log.warn(`Renault Server error: ${status} `);
+      return 'failed';
+    }
+    this.log.error('Fetching ' + element.path + ' for ' + vin + ' failed: ' + error);
+    error.response && this.log.error(JSON.stringify(error.response.data));
+    return 'failed';
+  }
+
+  /** Stop polling for a while after Renault answered with its quota error; each pause in a row is longer. */
+  pauseForQuota() {
+    const minutes = QUOTA_PAUSE_MINUTES[Math.min(this.quotaStrikes, QUOTA_PAUSE_MINUTES.length - 1)];
+    this.quotaStrikes++;
+    this.quotaPausedUntil = Date.now() + minutes * 60 * 1000;
+    this.log.warn(
+      'Renault request quota used up (429 err.func.wired.overloaded). Polling pauses for ' +
+        minutes +
+        ' minutes. Raise the update interval if this repeats.',
+    );
   }
   async refreshToken() {
     if (!this.session_data) {

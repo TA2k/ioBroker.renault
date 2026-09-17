@@ -52,6 +52,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) when Renault's request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint
 - (typhosj) login and requests use the country from the settings instead of always Germany; an invalid country falls back to de
 - (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning
 - (typhosj) polls no longer overlap: a manual refresh or a command during a running poll waits for it

@@ -12,6 +12,21 @@ function userWrite(val) {
   return /** @type {ioBroker.State} */ (/** @type {unknown} */ ({ val, ack: false }));
 }
 
+/** @type {sinon.SinonFakeTimers | undefined} */
+let clock;
+/** Fake only Date; adapter timers are already recorded by FakeAdapter. */
+function useClock(now = Date.parse('2026-09-17T10:00:00Z')) {
+  clock = sinon.useFakeTimers({ now, toFake: ['Date'] });
+  return clock;
+}
+afterEach(() => {
+  clock?.restore();
+  clock = undefined;
+});
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
 const urls = (adapter) => adapter.requestClient.getCalls().map((call) => call.args[0].url);
 const logged = (spy) => spy.getCalls().map((call) => String(call.args[0]));
 
@@ -367,5 +382,88 @@ describe('country and locale', () => {
     empty.config.country = '';
     await empty.onReady();
     expect(logged(empty.log.warn).some((line) => line.includes('Country'))).to.equal(false);
+  });
+});
+
+describe('request quota', () => {
+  const QUOTA = { errors: [{ errorCode: 'err.func.wired.overloaded', errorMessage: 'You have reached your quota limit' }] };
+  const kamereon = (adapter) => urls(adapter).filter((url) => url.includes('/kamereon/'));
+  const pauses = (adapter) => logged(adapter.log.warn).filter((line) => line.includes('quota'));
+
+  it('stops the cycle for all vehicles on the first 429 and warns once', async () => {
+    useClock();
+    const adapter = setup({
+      '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] },
+      '/cars/VIN1/battery-status': httpError(429, {}, QUOTA),
+    });
+    await adapter.onReady();
+    expect(kamereon(adapter)).to.have.length(1);
+    expect(pauses(adapter)).to.have.length(1);
+    expect(pauses(adapter)[0]).to.include('15 minutes');
+  });
+
+  it('treats a quota error body with another status as quota', async () => {
+    useClock();
+    const adapter = setup({ '/battery-status': httpError(500, {}, QUOTA) });
+    await adapter.onReady();
+    expect(kamereon(adapter)).to.have.length(1);
+    expect(pauses(adapter)).to.have.length(1);
+  });
+
+  it('skips polls during the pause and polls again when it ends', async () => {
+    const now = useClock();
+    const adapter = setup({ '/battery-status': httpError(429, {}, QUOTA) });
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    now.tick(15 * 60 * 1000 - 1);
+    await adapter.updateDevices();
+    expect(kamereon(adapter)).to.deep.equal([]);
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(kamereon(adapter)).to.have.length(1);
+  });
+
+  it('pauses 15, 30, 60 and 60 minutes in a row and starts at 15 again after a success', async () => {
+    const now = useClock();
+    let overloaded = true;
+    const adapter = setup({ '/battery-status': () => (overloaded ? httpError(429, {}, QUOTA) : {}) });
+    await adapter.onReady();
+    for (let i = 0; i < 3; i++) {
+      now.tick(DAY);
+      await adapter.updateDevices();
+    }
+    overloaded = false;
+    now.tick(DAY);
+    await adapter.updateDevices();
+    overloaded = true;
+    now.tick(DAY);
+    await adapter.updateDevices();
+    expect(pauses(adapter).map((line) => line.match(/(\d+) minutes/)?.[1])).to.deep.equal(['15', '30', '60', '60', '15']);
+  });
+
+  it('does not ignore the endpoint after a 429', async () => {
+    const now = useClock();
+    const adapter = setup({ '/battery-status': httpError(429, {}, QUOTA) });
+    await adapter.onReady();
+    now.tick(15 * 60 * 1000);
+    adapter.requestClient.resetHistory();
+    await adapter.updateDevices();
+    expect(kamereon(adapter)[0]).to.include('/battery-status');
+  });
+
+  it('schedules the next poll no earlier than the end of the pause', async () => {
+    useClock();
+    const adapter = setup({ '/battery-status': httpError(429, {}, QUOTA) });
+    adapter.config.interval = 5;
+    await adapter.onReady();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(15 * 60 * 1000);
+  });
+
+  it('keeps the configured interval when it is longer than the pause', async () => {
+    useClock();
+    const adapter = setup({ '/battery-status': httpError(429, {}, QUOTA) });
+    adapter.config.interval = 60;
+    await adapter.onReady();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(60 * 60 * 1000);
   });
 });
