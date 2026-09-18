@@ -173,6 +173,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) set the charge mode with `remote.chargeMode`
 - (typhosj) new buttons `remote.hornStart`, `remote.lightsStart` and `remote.refreshLocation` on models that support them, and `remote.refreshBattery`, which asks only the battery status for scripts that follow the wallbox
 - (typhosj) new channels `pressure` (tyre pressure in mbar) and `alerts` (Renault 5), read once per hour
+- (typhosj) the vehicle is named after its model without doubling it (`ZOE` instead of `ZOEZOE`); a name given by the user is kept
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
 - (typhosj) fewer requests against Renault's quota of about 60 per hour: slow-changing data such as the charge history is fetched once per hour, and the adapter warns once when its settings need more requests than the quota allows
 - (typhosj) when the request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint

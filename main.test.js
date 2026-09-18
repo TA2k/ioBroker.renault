@@ -2261,3 +2261,49 @@ describe('alerts', () => {
     expect(adapter.objects.get('renault.0.VIN1.alerts')?.common.name).to.equal('Alerts');
   });
 });
+
+describe('vehicle name', () => {
+  /**
+   * @param {any} details
+   * @param {string | null} [brand]
+   * @param {string} [stored] name of an existing device object
+   */
+  const named = async (details, brand = 'RENAULT', stored = undefined) => {
+    const adapter = setup({ '/vehicles?': { vehicleLinks: [{ vin: 'VIN1', brand, vehicleDetails: details }] } });
+    if (stored !== undefined) {
+      adapter.objects.set('renault.0.VIN1', { _id: 'renault.0.VIN1', type: 'device', common: { name: stored }, native: {} });
+    }
+    await adapter.onReady();
+    return adapter.objects.get('renault.0.VIN1')?.common.name;
+  };
+
+  /** @type {[any, string][]} */
+  const cases = [
+    [{ modelSCR: 'ZOE', model: { label: 'ZOE' } }, 'ZOE'],
+    [{ modelSCR: 'ZOE', model: { label: 'zoe' } }, 'ZOE'],
+    [{ modelSCR: 'MEGANE', model: { label: 'MEGANE E-TECH' } }, 'MEGANE E-TECH'],
+    [{ modelSCR: 'ZOE', model: { label: ' R135' } }, 'ZOE R135'],
+    [{ modelSCR: 'ZOE', model: { label: '' } }, 'ZOE'],
+    [{ modelSCR: 'ZOE' }, 'ZOE'],
+    [{ model: { label: 'SPRING' } }, 'SPRING'],
+    [{ modelSCR: '  ', model: { label: 5 } }, 'RENAULT'],
+    [{}, 'RENAULT'],
+  ];
+  for (const [details, expected] of cases) {
+    it(`names ${JSON.stringify(details)} ${expected}`, async () => {
+      expect(await named(details)).to.equal(expected);
+    });
+  }
+
+  it('names a vehicle without details after the VIN when the brand is missing too', async () => {
+    expect(await named({}, null)).to.equal('VIN1');
+  });
+
+  it('repairs the doubled name of earlier versions', async () => {
+    expect(await named({ modelSCR: 'ZOE', model: { label: 'ZOE' } }, 'RENAULT', 'ZOEZOE')).to.equal('ZOE');
+  });
+
+  it('keeps a name the user has given', async () => {
+    expect(await named({ modelSCR: 'ZOE', model: { label: 'ZOE' } }, 'RENAULT', 'My car')).to.equal('My car');
+  });
+});

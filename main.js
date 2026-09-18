@@ -232,6 +232,21 @@ const LEGACY_REMOTE_IDS = {
 };
 
 /**
+ * Model name of a vehicle link. modelSCR and model.label often repeat each other ("ZOE", "ZOE"),
+ * so a part that the other already contains is dropped.
+ *
+ * @param {any} device entry of vehicleLinks
+ */
+function vehicleName(device) {
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
+  const short = text(device.vehicleDetails?.modelSCR);
+  const label = text(device.vehicleDetails?.model?.label);
+  const contains = (a, b) => a.toLowerCase().includes(b.toLowerCase());
+  const name = !label || contains(short, label) ? short : !short || contains(label, short) ? label : short + ' ' + label;
+  return name || text(device.brand) || device.vin;
+}
+
+/**
  * An answer that carries only a message instead of vehicle data.
  *
  * @param {unknown} body
@@ -669,10 +684,7 @@ class Renault extends utils.Adapter {
           if (this.deviceArray.length && !this.deviceArray.includes(device.vin)) {
             this.log.info('New vehicle ' + device.vin + ' found, polling it from now on');
           }
-          let name = device.vehicleDetails?.modelSCR || device.brand;
-          if (device.vehicleDetails?.model?.label) {
-            name += device.vehicleDetails.model.label;
-          }
+          const name = vehicleName(device);
 
           this.ignoreState[device.vin] ??= {};
           this.answered[device.vin] ??= new Set();
@@ -699,6 +711,12 @@ class Renault extends utils.Adapter {
             },
             native: {},
           });
+          // Earlier versions glued both parts together ("ZOEZOE"); a name the user gave stays.
+          const legacyName = (device.vehicleDetails?.modelSCR || device.brand) + (device.vehicleDetails?.model?.label || '');
+          const stored = await this.getObjectAsync(device.vin);
+          if (stored?.common.name === legacyName && legacyName !== name) {
+            await this.extendObjectAsync(device.vin, { common: { name } });
+          }
           await this.setObjectNotExistsAsync(device.vin + '.remote', {
             type: 'channel',
             common: {
