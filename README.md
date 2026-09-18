@@ -28,18 +28,19 @@ This adapter connects ioBroker to the My Renault / My Dacia / My Alpine cloud an
 
 Each vehicle is created as a device using its VIN. Remote commands are exposed as states under `renault.0.<VIN>.remote.*`:
 
-| State                | Type    | Role                | Action                                                      |
-| -------------------- | ------- | ------------------- | ----------------------------------------------------------- |
-| `climateStart`       | boolean | `button.start`      | start the climate control                                   |
-| `climateStop`        | boolean | `button.stop`       | stop the climate control                                    |
-| `climateTemperature` | number  | `level.temperature` | target temperature in °C for the next start (default 21)    |
-| `chargingStart`      | boolean | `button.start`      | start charging (see below)                                  |
-| `chargingStop`       | boolean | `button.stop`       | stop charging                                               |
-| `chargeLimitMin`     | number  | `level`             | minimum charge level in %, 15 to 45 in steps of 5           |
-| `chargeLimitTarget`  | number  | `level`             | target charge level in %, 55 to 100 in steps of 5           |
-| `refreshAll`         | boolean | `button`            | poll all vehicle data now                                   |
-| `refreshBattery`     | boolean | `button`            | ask only the battery status, one minute later               |
-| `lastCommandError`   | string  | `text`              | error of the last command, empty after a successful command |
+| State                | Type    | Role                | Action                                                                                                       |
+| -------------------- | ------- | ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `climateStart`       | boolean | `button.start`      | start the climate control                                                                                    |
+| `climateStop`        | boolean | `button.stop`       | stop the climate control                                                                                     |
+| `climateTemperature` | number  | `level.temperature` | target temperature in °C for the next start (default 21)                                                     |
+| `chargingStart`      | boolean | `button.start`      | start charging (see below)                                                                                   |
+| `chargingStop`       | boolean | `button.stop`       | stop charging                                                                                                |
+| `chargeLimitMin`     | number  | `level`             | minimum charge level in %, 15 to 45 in steps of 5                                                            |
+| `chargeLimitTarget`  | number  | `level`             | target charge level in %, 55 to 100 in steps of 5                                                            |
+| `chargeMode`         | string  | `text`              | `always`, `always_charging`, `schedule_mode` or `scheduled`; the current mode is in `charge-mode.chargeMode` |
+| `refreshAll`         | boolean | `button`            | poll all vehicle data now                                                                                    |
+| `refreshBattery`     | boolean | `button`            | ask only the battery status, one minute later                                                                |
+| `lastCommandError`   | string  | `text`              | error of the last command, empty after a successful command                                                  |
 
 A button is pressed by writing `true`. The adapter resets it to `false` with `ack: true` once the
 command was handled; `lastCommandError` tells whether the Renault cloud accepted it. The car carries
@@ -94,6 +95,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) set the charge mode with `remote.chargeMode` (`always`, `always_charging`, `schedule_mode`, `scheduled`)
 - (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it (Megane E-Tech, Scenic E-Tech, Renault 4, Renault 5, Alpine A290, Master E-Tech); the current limits are read once per hour into `soc-levels`
 - (typhosj) new channel `pressure` with the tyre pressure per wheel in mbar, read once per hour on models that report it
 - (typhosj) **Breaking change:** the remote states are renamed and are buttons for every model. `hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature`, `charging` becomes `chargingStart` and `chargingStop`, `refresh` becomes `refreshAll`, `lastError` becomes `lastCommandError`. The old states are removed on the first start and the target temperature is taken over. Adjust scripts and visualizations.

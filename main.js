@@ -118,6 +118,14 @@ function isValidChargeLimit(value, limit) {
   return Number.isInteger(value) && Number(value) >= limit.min && Number(value) <= limit.max && Number(value) % CHARGE_LIMIT_STEP === 0;
 }
 
+/** Charge mode actions, as offered by Home Assistant's Renault select entity. */
+const CHARGE_MODES = {
+  always: 'always',
+  always_charging: 'always charging',
+  schedule_mode: 'schedule mode',
+  scheduled: 'scheduled',
+};
+
 const KCA = 'kca/car-adapter/v1/cars/';
 const KCM = 'kcm/v1/vehicles/';
 
@@ -729,6 +737,11 @@ class Renault extends utils.Adapter {
               step: CHARGE_LIMIT_STEP,
             });
           }
+          if (this.endpointMode(device.vin, 'actions/charge-set-mode') === null) {
+            unsupported.push('chargeMode');
+          } else {
+            remoteObjects.push({ id: 'chargeMode', name: 'Charge mode', type: 'string', role: 'text', states: CHARGE_MODES });
+          }
           remoteObjects.push(
             { id: 'refreshAll', name: 'Refresh all vehicle data', type: 'boolean', role: 'button', read: false },
             {
@@ -776,6 +789,7 @@ class Renault extends utils.Adapter {
                 ...(remote.unit ? { unit: remote.unit } : {}),
                 ...(remote.def !== undefined ? { def: remote.def } : {}),
                 ...(remote.min !== undefined ? { min: remote.min, max: remote.max, step: remote.step } : {}),
+                ...(remote.states ? { states: remote.states } : {}),
               },
               native: {},
             });
@@ -1443,6 +1457,10 @@ class Renault extends utils.Adapter {
       await this.setChargeLimit(id, vin, /** @type {keyof typeof CHARGE_LIMITS} */ (path), state.val);
       return;
     }
+    if (path === 'chargeMode') {
+      await this.setChargeMode(id, vin, state.val);
+      return;
+    }
     if (path === 'refreshBattery') {
       if (state.val === true) {
         this.log.debug('Battery refresh of ' + vin + ' requested');
@@ -1547,6 +1565,29 @@ class Renault extends utils.Adapter {
     }
     const body = { ...settings, programs: settings.programs.map((program) => ({ ...program, programActivationStatus: false })) };
     await this.sendCommand(vin, name, url, body);
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} vin
+   * @param {unknown} mode
+   */
+  async setChargeMode(id, vin, mode) {
+    if (this.endpointMode(vin, 'actions/charge-set-mode') === null) {
+      await this.reportCommandError(vin, 'chargeMode is not supported on this model. Nothing sent');
+      return;
+    }
+    if (typeof mode !== 'string' || !Object.hasOwn(CHARGE_MODES, mode)) {
+      await this.reportCommandError(
+        vin,
+        'chargeMode must be one of ' + Object.keys(CHARGE_MODES).join(', ') + ', got ' + JSON.stringify(mode) + '. Nothing sent',
+      );
+      return;
+    }
+    const body = { data: { type: 'ChargeMode', attributes: { action: mode } } };
+    if (await this.sendCommand(vin, 'chargeMode', this.kamereonUrl(KCA, vin, 'actions/charge-mode'), body)) {
+      await this.setState(id, mode, true);
+    }
   }
 
   /**

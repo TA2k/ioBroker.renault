@@ -1486,6 +1486,7 @@ describe('remote objects', () => {
     expect(remoteIds(adapter)).to.deep.equal([
       'chargeLimitMin',
       'chargeLimitTarget',
+      'chargeMode',
       'chargingStart',
       'chargingStop',
       'climateStart',
@@ -1510,9 +1511,10 @@ describe('remote objects', () => {
     };
     const always = ['lastCommandError', 'refreshAll', 'refreshBattery'];
     const all = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature', ...always];
-    expect(await ids('X102VE')).to.deep.equal(all);
+    // renault-api does not list charge-set-mode for the Zoe phase 2 and the XJA1VP, so they get the default
+    expect(await ids('X102VE')).to.deep.equal(['chargeMode', ...all]);
     expect(await ids('R5E1VE')).to.deep.equal(['chargeLimitMin', 'chargeLimitTarget', ...all.filter((id) => id !== 'chargingStop')]);
-    expect(await ids('XJA1VP')).to.deep.equal(always);
+    expect(await ids('XJA1VP')).to.deep.equal(['chargeMode', ...always]);
   });
 
   it('removes command states the model does not support', async () => {
@@ -2035,5 +2037,70 @@ describe('charge limits', () => {
       write: true,
     });
     expect(adapter.objects.get('renault.0.VIN1.remote.chargeLimitTarget')?.common).to.include({ min: 55, max: 100, step: 5 });
+  });
+});
+
+describe('charge mode', () => {
+  /**
+   * @param {string} [code] model code of VIN1
+   * @param {Record<string, unknown>} [routes]
+   */
+  async function ready(code = undefined, routes = {}) {
+    const adapter = setup(code ? { '/vehicles?': vehicleOf(code), ...routes } : routes);
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+  const posts = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .filter((request) => request.method === 'post');
+  const write = async (adapter, val) => {
+    const id = 'renault.0.VIN1.remote.chargeMode';
+    await adapter.setState(id, val, false);
+    await adapter.onStateChange(id, userWrite(val));
+  };
+
+  for (const mode of ['always', 'always_charging', 'schedule_mode', 'scheduled']) {
+    it(`sets the charge mode ${mode} and confirms it`, async () => {
+      const adapter = await ready();
+      await write(adapter, mode);
+      expect(posts(adapter)).to.have.length(1);
+      expect(posts(adapter)[0].url).to.include('/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charge-mode?country=de');
+      expect(posts(adapter)[0].data).to.deep.equal({ data: { type: 'ChargeMode', attributes: { action: mode } } });
+      expect(adapter.acks['VIN1.remote.chargeMode']).to.equal(true);
+    });
+  }
+
+  for (const mode of ['ALWAYS', '', 'toString', 'always ', 1, null, true]) {
+    it(`rejects the charge mode ${JSON.stringify(mode)}`, async () => {
+      const adapter = await ready();
+      await write(adapter, mode);
+      expect(posts(adapter)).to.deep.equal([]);
+      expect(adapter.acks['VIN1.remote.chargeMode']).to.equal(false);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('chargeMode');
+    });
+  }
+
+  it('leaves the state unconfirmed when the cloud refuses the mode', async () => {
+    const adapter = await ready(undefined, { '/actions/charge-mode': httpError(400) });
+    await write(adapter, 'always');
+    expect(adapter.acks['VIN1.remote.chargeMode']).to.equal(false);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('chargeMode');
+  });
+
+  it('creates the state with the allowed values', async () => {
+    const adapter = await ready();
+    const common = adapter.objects.get('renault.0.VIN1.remote.chargeMode')?.common;
+    expect(common).to.include({ type: 'string', role: 'text', read: true, write: true });
+    expect(Object.keys(common.states)).to.deep.equal(['always', 'always_charging', 'schedule_mode', 'scheduled']);
+  });
+
+  it('does not create the state on a model without charge mode', async () => {
+    const adapter = await ready('R5E1VE');
+    expect(adapter.objects.has('renault.0.VIN1.remote.chargeMode')).to.equal(false);
+    await adapter.onStateChange('renault.0.VIN1.remote.chargeMode', userWrite('always'));
+    expect(posts(adapter)).to.deep.equal([]);
   });
 });
