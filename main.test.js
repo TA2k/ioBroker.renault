@@ -227,28 +227,26 @@ describe('battery refresh', () => {
     return adapter;
   }
 
-  it('resets the button at once and asks only battery-status of that vehicle one minute later', async () => {
+  it('resets the button at once and asks only battery-status of that vehicle without delay', async () => {
     useClock();
     const adapter = await started({ '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] } });
     await press(adapter);
     expect(adapter.states['VIN1.remote.refreshBattery']).to.equal(false);
     expect(adapter.acks['VIN1.remote.refreshBattery']).to.equal(true);
-    expect(kamereon(adapter)).to.deep.equal([]);
-    expect(pending(adapter).ms).to.equal(MINUTE);
+    expect(pending(adapter).ms).to.equal(0);
     await pending(adapter).fn();
     expect(kamereon(adapter)).to.have.length(1);
     expect(kamereon(adapter)[0]).to.include('/cars/VIN1/battery-status');
   });
 
-  it('merges presses within the minute into one request after the last press', async () => {
-    const now = useClock();
+  it('merges presses before the read into one request', async () => {
+    useClock();
     const adapter = await started();
     await press(adapter);
     const first = pending(adapter);
-    now.tick(30 * 1000);
     await press(adapter);
     expect(adapter.clearTimeout.calledWith(first)).to.equal(true);
-    expect(pending(adapter).ms).to.equal(MINUTE);
+    expect(pending(adapter).ms).to.equal(0);
     await pending(adapter).fn();
     expect(kamereon(adapter)).to.have.length(1);
   });
@@ -257,14 +255,13 @@ describe('battery refresh', () => {
     const now = useClock();
     const adapter = await started();
     await press(adapter);
-    now.tick(MINUTE);
     await pending(adapter).fn();
     now.tick(30 * 1000);
     await press(adapter);
     expect(pending(adapter).ms).to.equal(3 * MINUTE - 30 * 1000);
     now.tick(3 * MINUTE);
     await press(adapter);
-    expect(pending(adapter).ms).to.equal(MINUTE);
+    expect(pending(adapter).ms).to.equal(0);
   });
 
   it('keeps no pending timer after the refresh ran', async () => {
@@ -1641,6 +1638,7 @@ describe('remote objects', () => {
     expect(deletedRemote(adapter)).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
     expect(remoteIds(adapter)).to.deep.equal([
       'askForBatteryRefresh',
+      'askForClimateRefresh',
       'askForLocationRefresh',
       'chargeLimitMin',
       'chargeLimitTarget',
@@ -1655,6 +1653,7 @@ describe('remote objects', () => {
       'lightsStart',
       'refreshAll',
       'refreshBattery',
+      'refreshClimate',
       'refreshLocation',
     ]);
     const removals = logged(adapter.log.info).filter((line) => line.startsWith('Removed VIN1.remote.'));
@@ -1674,10 +1673,11 @@ describe('remote objects', () => {
     const always = ['lastCommandError', 'refreshAll'];
     const location = ['refreshLocation', 'askForLocationRefresh'];
     const battery = ['refreshBattery', 'askForBatteryRefresh'];
+    const climate = ['refreshClimate', 'askForClimateRefresh'];
     const commands = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature'];
     // renault-api does not list charge-set-mode for the Zoe phase 2 and the XJA1VP, nor
     // refresh-location or refresh-battery-status for any of these, so they get the default
-    expect(await ids('X102VE')).to.deep.equal(sorted('chargeMode', ...location, ...battery, ...commands, ...always));
+    expect(await ids('X102VE')).to.deep.equal(sorted('chargeMode', ...location, ...battery, ...climate, ...commands, ...always));
     expect(await ids('R5E1VE')).to.deep.equal(
       sorted(
         'chargeLimitMin',
@@ -1686,11 +1686,12 @@ describe('remote objects', () => {
         'lightsStart',
         ...location,
         ...battery,
+        ...climate,
         ...commands.filter((id) => id !== 'chargingStop'),
         ...always,
       ),
     );
-    // the XJA1VP has no battery-status, so it gets no battery button either
+    // the XJA1VP has neither battery-status nor hvac-status, so it gets no battery or climate button
     expect(await ids('XJA1VP')).to.deep.equal(sorted('chargeMode', ...location, ...always));
   });
 
@@ -2369,6 +2370,7 @@ describe('horn, lights and location', () => {
     ['lightsStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'lights' } }],
     ['askForLocationRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-location?', { type: 'RefreshLocation' }],
     ['askForBatteryRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-battery-status?', { type: 'RefreshBatteryStatus' }],
+    ['askForClimateRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-hvac-status?', { type: 'RefreshHvacStatus' }],
   ];
   /** @param {string} [code] model code of VIN1 */
   async function ready(code = undefined) {
@@ -2421,7 +2423,14 @@ describe('horn, lights and location', () => {
     const common = (id) => adapter.objects.get('renault.0.VIN1.remote.' + id)?.common;
     expect(common('hornStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
     expect(common('lightsStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
-    for (const id of ['refreshLocation', 'askForLocationRefresh', 'refreshBattery', 'askForBatteryRefresh']) {
+    for (const id of [
+      'refreshLocation',
+      'askForLocationRefresh',
+      'refreshBattery',
+      'askForBatteryRefresh',
+      'refreshClimate',
+      'askForClimateRefresh',
+    ]) {
       expect(common(id)).to.include({ type: 'boolean', role: 'button', read: false, write: true });
     }
     expect(common('hornStop')).to.equal(undefined);
@@ -2463,6 +2472,21 @@ describe('refresh buttons', () => {
     return adapter;
   }
 
+  for (const [path, read] of [
+    ['refreshBattery', 'battery-status'],
+    ['refreshClimate', 'hvac-status'],
+  ]) {
+    it(`${path} reads only ${read} from the cloud at once, without asking the car`, async () => {
+      const adapter = await started();
+      await press(adapter, path);
+      expect(posts(adapter)).to.deep.equal([]);
+      expect(pending(adapter, read).ms).to.equal(0);
+      await pending(adapter, read).fn();
+      expect(kamereon(adapter)).to.have.length(1);
+      expect(kamereon(adapter)[0]).to.include('/cars/VIN1/' + read + '?');
+    });
+  }
+
   it('refreshLocation reads only the location from the cloud, without asking the car', async () => {
     const adapter = await started();
     const poll = adapter.pollTimeout;
@@ -2478,6 +2502,7 @@ describe('refresh buttons', () => {
   for (const [path, action, endpoint, read] of [
     ['askForLocationRefresh', '/actions/refresh-location?', LOCATION, 'location'],
     ['askForBatteryRefresh', '/actions/refresh-battery-status?', BATTERY, 'battery-status'],
+    ['askForClimateRefresh', '/actions/refresh-hvac-status?', '/cars/VIN1/hvac-status?', 'hvac-status'],
   ]) {
     it(`${path} asks the car, then reads only ${read} 30 seconds later`, async () => {
       const adapter = await started();
@@ -2529,7 +2554,7 @@ describe('refresh buttons', () => {
     const adapter = await started();
     await press(adapter, 'refreshBattery');
     await press(adapter, 'refreshLocation');
-    expect(pending(adapter, 'battery-status').ms).to.equal(MINUTE);
+    await pending(adapter, 'battery-status').fn();
     expect(pending(adapter, 'location').ms).to.equal(0);
   });
 
@@ -2563,10 +2588,12 @@ describe('refresh buttons', () => {
         native: {},
       });
     legacy('refreshLocation', 'Ask the car for its current location');
-    legacy('refreshBattery', 'Wallbox-Abfrage');
+    legacy('refreshBattery', 'Read the battery status from the cloud, one minute later');
+    legacy('refreshClimate', 'Wallbox-Abfrage');
     await adapter.onReady();
     expect(adapter.objects.get('renault.0.VIN1.remote.refreshLocation')?.common.name).to.equal('Read the location from the cloud');
-    expect(adapter.objects.get('renault.0.VIN1.remote.refreshBattery')?.common.name).to.equal('Wallbox-Abfrage');
+    expect(adapter.objects.get('renault.0.VIN1.remote.refreshBattery')?.common.name).to.equal('Read the battery status from the cloud');
+    expect(adapter.objects.get('renault.0.VIN1.remote.refreshClimate')?.common.name).to.equal('Wallbox-Abfrage');
   });
 });
 

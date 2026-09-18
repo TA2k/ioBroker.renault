@@ -82,16 +82,23 @@ const REFRESH_RETRY_MS = 30 * 1000;
  * @type {Record<string, RefreshButton>}
  */
 const REFRESH_BUTTONS = {
-  // the car needs some time to upload its new state after a change at the wallbox
-  refreshBattery: { name: 'Read the battery status from the cloud, one minute later', path: 'battery-status', delayMs: 60 * 1000 },
-  // Known limit: renault-api does not list refresh-battery-status, so no model is known to lack it;
-  // a car that rejects it reports the error in lastCommandError.
+  refreshBattery: { name: 'Read the battery status from the cloud', path: 'battery-status', delayMs: 0 },
+  // Known limit: renault-api does not list refresh-battery-status and refresh-hvac-status, so no
+  // model is known to lack them; a car that rejects one reports the error in lastCommandError.
   askForBatteryRefresh: {
     name: 'Ask the car for its battery status, read it 30 seconds later',
     path: 'battery-status',
     delayMs: 30 * 1000,
     action: 'actions/refresh-battery-status',
     type: 'RefreshBatteryStatus',
+  },
+  refreshClimate: { name: 'Read the climate control status from the cloud', path: 'hvac-status', delayMs: 0 },
+  askForClimateRefresh: {
+    name: 'Ask the car for its climate control status, read it 30 seconds later',
+    path: 'hvac-status',
+    delayMs: 30 * 1000,
+    action: 'actions/refresh-hvac-status',
+    type: 'RefreshHvacStatus',
   },
   refreshLocation: { name: 'Read the location from the cloud', path: 'location', delayMs: 0 },
   askForLocationRefresh: {
@@ -277,7 +284,7 @@ const LEGACY_REMOTE_IDS = {
 /** Default names of test versions whose meaning changed; such a name is replaced, a user's name is kept. */
 const LEGACY_REMOTE_NAMES = {
   refreshLocation: ['Ask the car for its current location'],
-  refreshBattery: ['Refresh only the battery status, one minute later'],
+  refreshBattery: ['Refresh only the battery status, one minute later', 'Read the battery status from the cloud, one minute later'],
 };
 
 /**
@@ -535,8 +542,7 @@ class Renault extends utils.Adapter {
 
   /**
    * Read one endpoint of one vehicle delayMs after the last call, and at most every three minutes.
-   * Presses before the read merge into it; a script that follows the wallbox so costs one request
-   * instead of a full poll.
+   * Presses before the read merge into it, so a script costs one request instead of a full poll.
    *
    * @param {string} vin
    * @param {string} path endpoint path
