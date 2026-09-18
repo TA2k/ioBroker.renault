@@ -924,8 +924,8 @@ describe('request budget', () => {
     const check = sinon.spy(adapter, 'checkRequestBudget');
     await adapter.onReady();
     await adapter.updateDevices();
-    // 11 non-hourly endpoints minus the ignored lock-status and minus cockpit v1, plus the hourly history, pressure and charge limits
-    expect(check.args).to.deep.equal([[9, 4]]);
+    // 11 non-hourly endpoints minus the ignored lock-status and minus cockpit v1, plus the hourly history, pressure, charge limits and alerts
+    expect(check.args).to.deep.equal([[9, 5]]);
     expect(budget(adapter)).to.have.length(1);
   });
 
@@ -1668,8 +1668,8 @@ describe('model endpoint table', () => {
     const adapter = setup({ '/vehicles?': vehicleOf('X102VE') });
     const check = sinon.spy(adapter, 'checkRequestBudget');
     await adapter.onReady();
-    // 11 non-hourly endpoints minus lock-status, res-state, charge-mode and cockpit v1; history and pressure hourly
-    expect(check.args).to.deep.equal([[7, 3]]);
+    // 11 non-hourly endpoints minus lock-status, res-state, charge-mode and cockpit v1; history, pressure and alerts hourly
+    expect(check.args).to.deep.equal([[7, 4]]);
   });
 
   it('holds only request variants the adapter knows', () => {
@@ -2192,5 +2192,53 @@ describe('horn, lights and location', () => {
       await write(adapter, path, true);
     }
     expect(posts(adapter)).to.deep.equal([]);
+  });
+});
+
+describe('alerts', () => {
+  const Json2iob = require('json2iob');
+  const ALERTS = '/kamereon/vehicles/VIN1/alerts?country=de';
+  const alerts = (adapter) => urls(adapter).filter((url) => url.includes(ALERTS));
+
+  it('reads the alerts once per hour', async () => {
+    const now = useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('R5E1VE') });
+    await adapter.onReady();
+    now.tick(HOUR - 1);
+    await adapter.updateDevices();
+    expect(alerts(adapter)).to.have.length(1);
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(alerts(adapter)).to.have.length(2);
+  });
+
+  it('does not ask a model without alerts', async () => {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('XBG1VE') });
+    await adapter.onReady();
+    expect(alerts(adapter)).to.deep.equal([]);
+  });
+
+  it('stores a list of alerts with numeric indices and drops cleared ones', async () => {
+    const now = useClock();
+    let answer = [{ code: 'A1' }, { code: 'B2' }];
+    const adapter = setup({ '/alerts?': () => answer });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    expect(adapter.objects.has('renault.0.VIN1.alerts.02.code')).to.equal(true);
+    answer = [{ code: 'A1' }];
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(adapter.objects.has('renault.0.VIN1.alerts.01.code')).to.equal(true);
+    expect(adapter.objects.has('renault.0.VIN1.alerts.02.code')).to.equal(false);
+  });
+
+  it('stores an object answer below the channel', async () => {
+    useClock();
+    const adapter = setup({ '/alerts?': { data: { attributes: { alerts: [{ code: 'A1' }] } } } });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    expect(adapter.objects.has('renault.0.VIN1.alerts.alerts01.code')).to.equal(true);
+    expect(adapter.objects.get('renault.0.VIN1.alerts')?.common.name).to.equal('Alerts');
   });
 });

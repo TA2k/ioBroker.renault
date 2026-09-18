@@ -60,7 +60,7 @@ const DEFAULT_TEMPERATURE = 21;
 const BATTERY_REFRESH_DELAY_MS = 60 * 1000;
 const BATTERY_REFRESH_GAP_MS = 3 * 60 * 1000;
 
-/** @typedef {{ path: string, url: string, desc: string, channel?: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
+/** @typedef {{ path: string, url: string, desc: string, channel?: string, isHistory?: boolean, hourly?: boolean, replace?: boolean }} Endpoint */
 
 /** Units of known vehicle data keys; json2iob matches them by the last id segment. */
 const DATA_UNITS = {
@@ -1013,6 +1013,17 @@ class Renault extends utils.Adapter {
         desc: 'Charge limits',
         hourly: true,
       },
+      {
+        path: 'alerts',
+        url:
+          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+          this.account.accountId +
+          '/kamereon/vehicles/$vin/alerts?country=' +
+          this.country,
+        desc: 'Alerts',
+        hourly: true,
+        replace: true,
+      },
     ];
 
     if (!this.config.disableChargeFetching) {
@@ -1291,8 +1302,14 @@ class Renault extends utils.Adapter {
         data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
       }
     }
+    // Known limit: renault-api has no model of the alerts answer. Numeric indices and a rebuild
+    // on every read, so a cleared alert disappears; units and roles once a real answer is known.
+    if (element.replace) {
+      forceIndex = true;
+    }
     await this.json2iob.parse(vin + '.' + (element.channel ?? element.path), data, {
       forceIndex,
+      deleteBeforeUpdate: element.replace,
       channelName: element.desc,
       units: DATA_UNITS,
       roles: DATA_ROLES,

@@ -78,12 +78,13 @@ The data of each endpoint is written to a channel below `renault.0.<VIN>`, named
 endpoint, for example `battery-status`, `cockpit` and `hvac-status`. Most are asked on every
 poll; these change slowly and are asked once per hour:
 
-| Channel          | Content                                           |
-| ---------------- | ------------------------------------------------- |
-| `charge-history` | charges per day                                   |
-| `charges`        | single charges                                    |
-| `pressure`       | tyre pressure per wheel in mbar and a status code |
-| `soc-levels`     | minimum and target charge level                   |
+| Channel          | Content                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| `charge-history` | charges per day                                             |
+| `charges`        | single charges                                              |
+| `pressure`       | tyre pressure per wheel in mbar and a status code           |
+| `alerts`         | alerts of the car (Renault 5), stored as the car sends them |
+| `soc-levels`     | minimum and target charge level                             |
 
 ## Discussion / questions
 
@@ -98,6 +99,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) new channel `alerts` with the alerts of the car (Renault 5), read once per hour
 - (typhosj) new buttons `remote.hornStart`, `remote.lightsStart` and `remote.refreshLocation` on models that support them
 - (typhosj) set the charge mode with `remote.chargeMode` (`always`, `always_charging`, `schedule_mode`, `scheduled`)
 - (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it (Megane E-Tech, Scenic E-Tech, Renault 4, Renault 5, Alpine A290, Master E-Tech); the current limits are read once per hour into `soc-levels`
