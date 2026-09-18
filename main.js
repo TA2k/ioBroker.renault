@@ -254,25 +254,14 @@ function commandStateId(command, on) {
   return command + (on ? 'Start' : 'Stop');
 }
 
-/** Remote state ids of earlier versions and the states that replace them, removed once per vehicle. */
+/** Remote state ids of 0.0.25 and the states that replace them, removed once per vehicle. */
 const LEGACY_REMOTE_IDS = {
   'actions/hvac-start': 'climateStart and climateStop',
   'actions/charging-start': 'chargingStart and chargingStop',
   'charge/pause-resume': 'chargingStart and chargingStop',
   'charge/start': 'chargingStart',
-  'hvac-start': 'climateStart and climateStop',
   'hvac-temperature': 'climateTemperature',
-  charging: 'chargingStart and chargingStop',
   refresh: 'refreshAll',
-  lastError: 'lastCommandError',
-  askForBatteryRefresh: 'refreshBattery',
-  askForClimateRefresh: 'refreshClimate',
-};
-
-/** Default names of test versions whose meaning changed; such a name is replaced, a user's name is kept. */
-const LEGACY_REMOTE_NAMES = {
-  refreshLocation: ['Ask the car for its current location'],
-  refreshBattery: ['Refresh only the battery status, one minute later', 'Read the battery status from the cloud, one minute later'],
 };
 
 /**
@@ -877,24 +866,12 @@ class Renault extends utils.Adapter {
               ...(remote.min !== undefined ? { min: remote.min, max: remote.max, step: remote.step } : {}),
               ...(remote.states ? { states: remote.states } : {}),
             };
-            const stored = await this.getObjectAsync(objectId);
-            if (!stored) {
-              await this.setObjectNotExistsAsync(objectId, {
-                type: 'state',
-                common: /** @type {ioBroker.StateCommon} */ (/** @type {unknown} */ (common)),
-                native: {},
-              });
-              continue;
-            }
-            // Installations of older versions get the new roles; a name the user gave stays, an
-            // outdated default name is replaced.
-            const renamed = LEGACY_REMOTE_NAMES[remote.id]?.includes(stored.common.name);
-            const changed = Object.entries(common).filter(
-              ([key, value]) => (key !== 'name' || renamed) && JSON.stringify(stored.common[key]) !== JSON.stringify(value),
-            );
-            if (changed.length) {
-              await this.extendObjectAsync(objectId, { common: Object.fromEntries(changed) });
-            }
+            // a name the user gave stays; 0.0.25 had none of these ids, so nothing needs updating
+            await this.setObjectNotExistsAsync(objectId, {
+              type: 'state',
+              common: /** @type {ioBroker.StateCommon} */ (/** @type {unknown} */ (common)),
+              native: {},
+            });
           }
           if (climate) {
             const temperatureId = device.vin + '.remote.climateTemperature';
@@ -1219,7 +1196,7 @@ class Renault extends utils.Adapter {
     for (const vin of this.deviceArray) {
       const chosen = this.cockpitChoice[vin];
       if (chosen && this.ignoreState[vin]?.[chosen] !== undefined) {
-        // An earlier version kept a cockpit that does not deliver data; choose again.
+        // The kept cockpit no longer delivers data; choose again.
         delete this.cockpitChoice[vin];
         changed = true;
         this.log.info('Vehicle ' + vin + ' gets no data from ' + chosen + ', trying the other cockpit version again');

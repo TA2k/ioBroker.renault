@@ -1580,19 +1580,6 @@ describe('remote objects', () => {
     expect(common(adapter, 'lastCommandError')).to.include({ type: 'string', role: 'text', read: true, write: false });
   });
 
-  it('updates states created by older versions and keeps their name', async () => {
-    const adapter = setup();
-    adapter.objects.set('renault.0.VIN1.remote.refreshAll', {
-      _id: 'renault.0.VIN1.remote.refreshAll',
-      type: 'state',
-      common: { name: 'My refresh', type: 'boolean', role: 'state', read: true, write: true, custom: { 'history.0': {} } },
-      native: {},
-    });
-    await adapter.onReady();
-    expect(common(adapter, 'refreshAll')).to.include({ name: 'My refresh', role: 'button', read: false });
-    expect(common(adapter, 'refreshAll').custom).to.deep.equal({ 'history.0': {} });
-  });
-
   it('keeps a renamed remote state and writes no unchanged object on the daily reload', async () => {
     const adapter = setup();
     await adapter.onReady();
@@ -1603,30 +1590,8 @@ describe('remote objects', () => {
     expect(extend.getCalls().filter((call) => String(call.args[0]).includes('.remote.'))).to.deep.equal([]);
   });
 
-  it('updates a changed range or state list of an existing remote state', async () => {
-    const adapter = setup();
-    await adapter.onReady();
-    await adapter.extendObjectAsync('VIN1.remote.chargeLimitMin', { common: { min: 0, max: 100 } });
-    await adapter.extendObjectAsync('VIN1.remote.chargeMode', { common: { states: { always: 'always' } } });
-    await adapter.getDeviceList();
-    expect(common(adapter, 'chargeLimitMin')).to.include({ min: 15, max: 45 });
-    expect(Object.keys(common(adapter, 'chargeMode').states)).to.have.length(4);
-  });
-
-  it('replaces the states of earlier versions once', async () => {
-    const legacy = [
-      'actions/hvac-start',
-      'actions/charging-start',
-      'charge/pause-resume',
-      'charge/start',
-      'hvac-start',
-      'hvac-temperature',
-      'charging',
-      'refresh',
-      'lastError',
-      'askForBatteryRefresh',
-      'askForClimateRefresh',
-    ];
+  it('replaces the states of 0.0.25 once', async () => {
+    const legacy = ['actions/hvac-start', 'actions/charging-start', 'charge/pause-resume', 'charge/start', 'hvac-temperature', 'refresh'];
     const adapter = setup();
     for (const id of legacy) {
       adapter.objects.set('renault.0.VIN1.remote.' + id, {
@@ -1658,7 +1623,7 @@ describe('remote objects', () => {
     ]);
     const removals = logged(adapter.log.info).filter((line) => line.startsWith('Removed VIN1.remote.'));
     expect(removals).to.have.length(legacy.length);
-    expect(removals.find((line) => line.includes('.hvac-start,'))).to.include('climateStart and climateStop');
+    expect(removals.find((line) => line.includes('.actions/hvac-start,'))).to.include('climateStart and climateStop');
     await adapter.getDeviceList();
     expect(deletedRemote(adapter)).to.have.length(legacy.length);
   });
@@ -2571,24 +2536,6 @@ describe('refresh buttons', () => {
     }
     expect(posts(adapter)).to.deep.equal([]);
     expect(adapter.refreshTimeouts).to.deep.equal({});
-  });
-
-  it('replaces the default name of a test version and keeps a name the user gave', async () => {
-    const adapter = setup();
-    const legacy = (id, name) =>
-      adapter.objects.set('renault.0.VIN1.remote.' + id, {
-        _id: 'renault.0.VIN1.remote.' + id,
-        type: 'state',
-        common: { name, type: 'boolean', role: 'button', read: false, write: true },
-        native: {},
-      });
-    legacy('refreshLocation', 'Ask the car for its current location');
-    legacy('refreshBattery', 'Read the battery status from the cloud, one minute later');
-    legacy('refreshClimate', 'Wallbox-Abfrage');
-    await adapter.onReady();
-    expect(adapter.objects.get('renault.0.VIN1.remote.refreshLocation')?.common.name).to.equal('Read the location from the cloud');
-    expect(adapter.objects.get('renault.0.VIN1.remote.refreshBattery')?.common.name).to.equal('Read the battery status from the cloud');
-    expect(adapter.objects.get('renault.0.VIN1.remote.refreshClimate')?.common.name).to.equal('Wallbox-Abfrage');
   });
 });
 
