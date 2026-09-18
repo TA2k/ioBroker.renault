@@ -15,6 +15,8 @@ class FakeAdapter extends EventEmitter {
     this.states = {};
     /** @type {Record<string, boolean>} ack flags by relative id */
     this.acks = {};
+    /** @type {Record<string, number>} write times by relative id */
+    this.stamps = {};
     /** @type {Map<string, any>} objects by full id */
     this.objects = new Map();
     /** @type {string[]} relative ids passed to delObjectAsync */
@@ -44,6 +46,7 @@ class FakeAdapter extends EventEmitter {
     const isObject = state !== null && typeof state === 'object';
     this.states[key] = isObject ? state.val : state;
     this.acks[key] = Boolean(isObject ? state.ack : ack);
+    this.stamps[key] = Date.now();
     return Promise.resolve();
   }
 
@@ -79,6 +82,28 @@ class FakeAdapter extends EventEmitter {
       this.objects.set(key, { ...object, _id: key });
     }
     return Promise.resolve();
+  }
+
+  /** @param {string} pattern full id ending in `.*` */
+  getForeignObjectsAsync(pattern) {
+    const prefix = pattern.slice(0, -1);
+    return Promise.resolve(Object.fromEntries([...this.objects].filter(([id]) => id.startsWith(prefix))));
+  }
+
+  /** @param {string} pattern full id ending in `.*` */
+  getForeignStatesAsync(pattern) {
+    const prefix = this.relativeId(pattern.slice(0, -1));
+    return Promise.resolve(
+      Object.fromEntries(
+        Object.keys(this.states)
+          .filter((key) => key.startsWith(prefix))
+          .map((key) => [this.fullId(key), { val: this.states[key], ack: this.acks[key], ts: this.stamps[key] }]),
+      ),
+    );
+  }
+
+  delForeignObjectAsync(id) {
+    return this.delObjectAsync(id);
   }
 
   setObjectNotExists(id, object) {

@@ -50,6 +50,11 @@ const KAMEREON_KEY_URL = 'https://raw.githubusercontent.com/hacf-fr/renault-api/
 const BUNDLED_KAMEREON_KEY = 'YjkKtHmGfaceeuExUDKGxrLZGGvtVS0J';
 const KAMEREON_KEY = /^[A-Za-z0-9]{20,64}$/;
 const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
+/**
+ * Gigya error codes that a repeated login cannot fix: invalid login or password, old password,
+ * captcha required. Every other error body (server error, temporary lockout) is retried.
+ */
+const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
 const QUOTA_PAUSE_MINUTES = [15, 30, 60];
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -328,6 +333,8 @@ class Renault extends utils.Adapter {
     this.batteryRefreshTimeouts = {};
     /** @type {Record<string, number>} vin -> time of the last battery refresh */
     this.lastBatteryRefresh = {};
+    /** @type {Set<Promise<void>>} battery refreshes in flight; a full poll waits for them */
+    this.batteryRefreshes = new Set();
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -493,23 +500,25 @@ class Renault extends utils.Adapter {
     const due = Math.max(Date.now() + BATTERY_REFRESH_DELAY_MS, (this.lastBatteryRefresh[vin] ?? -Infinity) + BATTERY_REFRESH_GAP_MS);
     this.batteryRefreshTimeouts[vin] = this.setTimeout(async () => {
       delete this.batteryRefreshTimeouts[vin];
-      // a running poll asks battery-status anyway
+      // the running poll may have asked battery-status before the change, so ask again after it
       if (this.polling) {
+        this.scheduleBatteryRefresh(vin);
         return;
       }
       this.lastBatteryRefresh[vin] = Date.now();
-      this.polling = true;
+      const refresh = this.updateDevices(false, { vin, path: 'battery-status' }).catch((error) =>
+        this.log.error('Battery refresh failed: ' + error),
+      );
+      this.batteryRefreshes.add(refresh);
       try {
-        await this.updateDevices(false, { vin, path: 'battery-status' });
-      } catch (error) {
-        this.log.error('Battery refresh failed: ' + error);
+        await refresh;
       } finally {
-        this.polling = false;
+        this.batteryRefreshes.delete(refresh);
       }
     }, due - Date.now());
   }
 
-  /** Run one poll cycle unless one is already running. */
+  /** Run one poll cycle unless one is already running; a running battery refresh is awaited first. */
   async pollNow() {
     if (this.polling) {
       this.log.debug('Poll skipped, the previous poll is still running');
@@ -517,6 +526,7 @@ class Renault extends utils.Adapter {
     }
     this.polling = true;
     try {
+      await Promise.all(this.batteryRefreshes);
       await this.updateDevices();
     } finally {
       this.polling = false;
@@ -555,7 +565,7 @@ class Renault extends utils.Adapter {
     })
       .then((res) => {
         if (res.data.errorMessage) {
-          this.loginRejected = true;
+          this.loginRejected = LOGIN_REJECTED_CODES.includes(Number(res.data.errorCode));
           this.log.error(JSON.stringify(res.data));
           return;
         }
@@ -825,22 +835,35 @@ class Renault extends utils.Adapter {
             }
           }
           for (const remote of remoteObjects) {
-            // extendObject, so installations of older versions get the new roles too
-            await this.extendObjectAsync(device.vin + '.remote.' + remote.id, {
-              type: 'state',
-              common: {
-                name: remote.name,
-                type: /** @type {ioBroker.CommonType} */ (remote.type),
-                role: remote.role,
-                read: remote.read ?? true,
-                write: remote.write ?? true,
-                ...(remote.unit ? { unit: remote.unit } : {}),
-                ...(remote.def !== undefined ? { def: remote.def } : {}),
-                ...(remote.min !== undefined ? { min: remote.min, max: remote.max, step: remote.step } : {}),
-                ...(remote.states ? { states: remote.states } : {}),
-              },
-              native: {},
-            });
+            const objectId = device.vin + '.remote.' + remote.id;
+            /** @type {Record<string, unknown>} */
+            const common = {
+              name: remote.name,
+              type: remote.type,
+              role: remote.role,
+              read: remote.read ?? true,
+              write: remote.write ?? true,
+              ...(remote.unit ? { unit: remote.unit } : {}),
+              ...(remote.def !== undefined ? { def: remote.def } : {}),
+              ...(remote.min !== undefined ? { min: remote.min, max: remote.max, step: remote.step } : {}),
+              ...(remote.states ? { states: remote.states } : {}),
+            };
+            const stored = await this.getObjectAsync(objectId);
+            if (!stored) {
+              await this.setObjectNotExistsAsync(objectId, {
+                type: 'state',
+                common: /** @type {ioBroker.StateCommon} */ (/** @type {unknown} */ (common)),
+                native: {},
+              });
+              continue;
+            }
+            // Installations of older versions get the new roles; a name the user gave stays.
+            const changed = Object.entries(common).filter(
+              ([key, value]) => key !== 'name' && JSON.stringify(stored.common[key]) !== JSON.stringify(value),
+            );
+            if (changed.length) {
+              await this.extendObjectAsync(objectId, { common: Object.fromEntries(changed) });
+            }
           }
           if (climate) {
             const temperatureId = device.vin + '.remote.climateTemperature';
@@ -927,7 +950,7 @@ class Renault extends utils.Adapter {
         desc: 'Battery inhibition status of the car',
       },
       // Both cockpit versions write to <vin>.cockpit. v2 comes first; v1 is asked only when v2 is
-      // not supported (isPolled), so the channel never mixes the answers of both.
+      // not supported or answers with server errors (isPolled).
       {
         path: 'cockpitv2',
         channel: 'cockpit',
@@ -1210,8 +1233,7 @@ class Renault extends utils.Adapter {
     if (since !== undefined && now - since < DAY_MS) {
       return false;
     }
-    const failing = this.serverErrors[vin]?.[element.path];
-    if (failing && !hourlyDue && now - failing.since >= DAY_MS) {
+    if (this.serverErrors[vin]?.[element.path]?.hourly && !hourlyDue) {
       return false;
     }
     const cockpit = this.cockpitChoice[vin];
@@ -1219,7 +1241,8 @@ class Renault extends utils.Adapter {
       return cockpit !== 'cockpit';
     }
     if (element.path === 'cockpit') {
-      return cockpit === 'cockpit' || this.ignoreState[vin]?.cockpitv2 !== undefined;
+      // v1 also fills in while v2 answers with server errors, so the mileage does not stop
+      return cockpit === 'cockpit' || this.ignoreState[vin]?.cockpitv2 !== undefined || this.serverErrors[vin]?.cockpitv2 !== undefined;
     }
     return true;
   }
@@ -1320,20 +1343,80 @@ class Renault extends utils.Adapter {
         data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
       }
     }
-    // Known limit: renault-api has no model of the alerts answer. Numeric indices and a rebuild
-    // on every read, so a cleared alert disappears; units and roles once a real answer is known.
+    // Known limit: renault-api has no model of the alerts answer. Numeric indices, and entries the
+    // answer no longer has are removed, so a cleared alert disappears; units and roles once a real
+    // answer is known.
     if (element.replace) {
       forceIndex = true;
     }
-    await this.json2iob.parse(vin + '.' + (element.channel ?? element.path), data, {
+    const prefix = vin + '.' + (element.channel ?? element.path);
+    const parsedAt = Date.now();
+    await this.json2iob.parse(prefix, data, {
       forceIndex,
-      deleteBeforeUpdate: element.replace,
       channelName: element.desc,
       units: DATA_UNITS,
       roles: DATA_ROLES,
       write: false,
     });
+    if (element.replace) {
+      await this.removeStaleObjects(prefix, parsedAt);
+    }
+    await this.syncRemoteStates(vin, element.path, data);
     return 'ok';
+  }
+
+  /**
+   * Delete the objects below prefix that the last parse did not write. Unlike json2iob's
+   * deleteBeforeUpdate this keeps the objects that stay, and with them their history settings.
+   *
+   * @param {string} prefix id relative to the namespace
+   * @param {number} since start of the parse
+   */
+  async removeStaleObjects(prefix, since) {
+    const pattern = this.namespace + '.' + prefix + '.*';
+    const objects = (await this.getForeignObjectsAsync(pattern)) ?? {};
+    const states = (await this.getForeignStatesAsync(pattern)) ?? {};
+    const fresh = Object.keys(objects).filter((id) => objects[id]?.type === 'state' && (states[id]?.ts ?? 0) >= since);
+    for (const id of Object.keys(objects)) {
+      if (fresh.some((kept) => kept === id || kept.startsWith(id + '.'))) {
+        continue;
+      }
+      await this.delForeignObjectAsync(id);
+      // Known limit: json2iob creates an object only once per run and keeps that in a private map;
+      // forget the entry, so a returning alert gets its object again (json2iob's deleteBeforeUpdate does the same).
+      delete (/** @type {any} */ (this.json2iob).alreadyCreatedObjects?.[id.slice(this.namespace.length + 1)]);
+    }
+  }
+
+  /**
+   * Show the charge mode and the charge limits the car reports in the remote states that set them.
+   *
+   * @param {string} vin
+   * @param {string} path endpoint path
+   * @param {any} data answer attributes
+   */
+  async syncRemoteStates(vin, path, data) {
+    if (path === 'charge-mode' && typeof data?.chargeMode === 'string' && Object.hasOwn(CHARGE_MODES, data.chargeMode)) {
+      await this.setRemoteState(vin, 'chargeMode', data.chargeMode);
+    }
+    if (path === 'soc-levels') {
+      for (const [id, limit] of Object.entries(CHARGE_LIMITS)) {
+        if (isValidChargeLimit(data?.[limit.key], limit)) {
+          await this.setRemoteState(vin, id, data[limit.key]);
+        }
+      }
+    }
+  }
+
+  /**
+   * @param {string} vin
+   * @param {string} id state id below remote
+   * @param {string | number} value
+   */
+  async setRemoteState(vin, id, value) {
+    if (await this.getObjectAsync(vin + '.remote.' + id)) {
+      await this.setState(vin + '.remote.' + id, value, true);
+    }
   }
 
   /**
@@ -1516,6 +1599,17 @@ class Renault extends utils.Adapter {
     }
     if (!this.account) {
       this.log.error('No account found');
+      return;
+    }
+    if (this.loginRejected) {
+      // a command would end in a login attempt with the rejected credentials
+      await this.reportCommandError(
+        vin,
+        path + ': the login was rejected, check email and password and restart the instance. Nothing sent',
+      );
+      if (typeof state.val === 'boolean') {
+        await this.setState(id, false, true);
+      }
       return;
     }
     if (Object.hasOwn(CHARGE_LIMITS, path)) {

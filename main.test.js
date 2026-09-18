@@ -78,6 +78,33 @@ describe('startup', () => {
     expect(logged(adapter.log.error).some((line) => line.includes('Check email and password'))).to.equal(true);
   });
 
+  for (const [errorCode, errorMessage] of [
+    [401030, 'Old Password Used'],
+    [401020, 'Login Failed Captcha Required'],
+    ['403042', 'code as string'],
+  ]) {
+    it(`does not retry a login rejected with ${errorCode}`, async () => {
+      const adapter = setup({ 'accounts.login': { errorCode, errorMessage } });
+      await adapter.onReady();
+      expect(adapter.timeouts).to.have.length(0);
+    });
+  }
+
+  for (const body of [
+    { errorCode: 500001, errorMessage: 'General Server Error' },
+    { errorCode: 403120, errorMessage: 'Account temporarily locked out' },
+    { errorMessage: 'no error code' },
+    { errorCode: null, errorMessage: 'null error code' },
+  ]) {
+    it(`retries a login that failed with ${JSON.stringify(body)}`, async () => {
+      const adapter = setup({ 'accounts.login': body });
+      await adapter.onReady();
+      expect(adapter.loginRejected).to.equal(false);
+      expect(adapter.timeouts.at(-1)?.ms).to.equal(5 * 60 * 1000);
+      expect(adapter.states['info.connection']).to.equal(false);
+    });
+  }
+
   it('reports no connection when no matching account exists', async () => {
     const adapter = setup({ '/connection': { currentUser: { accounts: [{ ...ACCOUNT, accountType: 'OTHER' }] } } });
     await adapter.onReady();
@@ -257,13 +284,52 @@ describe('battery refresh', () => {
     expect(kamereon(adapter)).to.deep.equal([]);
   });
 
-  it('asks nothing while a full poll runs, that poll brings the battery status', async () => {
+  it('asks again after a full poll that runs when the refresh is due', async () => {
     useClock();
     const adapter = await started();
     adapter.polling = true;
     await press(adapter);
-    await pending(adapter).fn();
+    const first = pending(adapter);
+    await first.fn();
     expect(kamereon(adapter)).to.deep.equal([]);
+    expect(pending(adapter)).to.not.equal(first);
+    expect(pending(adapter).ms).to.equal(MINUTE);
+    adapter.polling = false;
+    await pending(adapter).fn();
+    expect(kamereon(adapter)).to.have.length(1);
+  });
+
+  it('lets a full poll wait for a running battery refresh instead of skipping it', async () => {
+    useClock();
+    /** @type {(value: unknown) => void} */
+    let answer = () => {};
+    let calls = 0;
+    const adapter = await started();
+    // only the battery refresh hangs until answered, the poll after it gets its answer at once
+    adapter.requestClient = setup({
+      '/battery-status': () => (calls++ === 0 ? new Promise((resolve) => (answer = resolve)) : {}),
+    }).requestClient;
+    await press(adapter);
+    const refresh = pending(adapter).fn();
+    const poll = adapter.pollNow();
+    expect(kamereon(adapter)).to.have.length(1);
+    answer({});
+    await Promise.all([refresh, poll]);
+    expect(kamereon(adapter).length).to.be.greaterThan(2);
+    expect(logged(adapter.log.debug).some((line) => line.includes('Poll skipped'))).to.equal(false);
+    expect(adapter.polling).to.equal(false);
+    expect(adapter.batteryRefreshes.size).to.equal(0);
+  });
+
+  it('lets a full poll run after a failed battery refresh', async () => {
+    useClock();
+    const adapter = await started();
+    adapter.requestClient = setup({ '/battery-status': new Error('ECONNRESET') }).requestClient;
+    await press(adapter);
+    const refresh = pending(adapter).fn();
+    await Promise.all([refresh, adapter.pollNow()]);
+    expect(kamereon(adapter).length).to.be.greaterThan(2);
+    expect(adapter.batteryRefreshes.size).to.equal(0);
   });
 
   it('refreshes the token once and asks battery-status again after a 401', async () => {
@@ -755,6 +821,44 @@ describe('relogin', () => {
     expect(logged(adapter.log.error).some((line) => line.includes('Check email and password'))).to.equal(true);
   });
 
+  it('keeps retrying a relogin that fails with a Gigya server error', async () => {
+    const adapter = await connected();
+    failRefresh(adapter, { 'accounts.login': { errorCode: 500001, errorMessage: 'General Server Error' } });
+    await adapter.refreshToken();
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(5 * 60 * 1000);
+    adapter.requestClient = setup().requestClient;
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.states['info.connection']).to.equal(true);
+  });
+
+  it('sends no command and tries no login after the login was rejected', async () => {
+    const adapter = await connected();
+    failRefresh(adapter, { 'accounts.login': { errorCode: 403042, errorMessage: 'Invalid LoginID' } });
+    await adapter.refreshToken();
+    await adapter.timeouts.at(-1)?.fn();
+    adapter.requestClient.resetHistory();
+    const timers = adapter.timeouts.length;
+    await adapter.onStateChange('renault.0.VIN1.remote.climateStart', userWrite(true));
+    await adapter.onStateChange('renault.0.VIN1.remote.refreshAll', userWrite(true));
+    await adapter.onStateChange('renault.0.VIN1.remote.chargeLimitTarget', userWrite(80));
+    expect(adapter.requestClient.called).to.equal(false);
+    expect(adapter.timeouts).to.have.length(timers);
+    expect(adapter.states['VIN1.remote.climateStart']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.climateStart']).to.equal(true);
+    expect(adapter.states['VIN1.remote.refreshAll']).to.equal(false);
+    expect(adapter.states['VIN1.remote.chargeLimitTarget']).to.equal(undefined);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('login was rejected');
+  });
+
+  it('keeps the target temperature writable after the login was rejected', async () => {
+    const adapter = await connected();
+    adapter.loginRejected = true;
+    await adapter.onStateChange('renault.0.VIN1.remote.climateTemperature', userWrite(19));
+    expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(19);
+    expect(adapter.acks['VIN1.remote.climateTemperature']).to.equal(true);
+  });
+
   it('runs exactly one poll timer and one refresh interval after a successful relogin', async () => {
     const adapter = await connected();
     const refresh = adapter.refreshTokenInterval;
@@ -1059,7 +1163,38 @@ describe('cockpit version', () => {
     expect(v1(adapter)).to.have.length(2);
   });
 
-  for (const status of [401, 429, 503]) {
+  for (const status of [500, 503]) {
+    it(`asks v1 but decides nothing while v2 answers ${status}`, async () => {
+      useClock();
+      let failing = true;
+      const adapter = setup({ '/v2/cars/VIN1/cockpit?': () => (failing ? httpError(status) : {}) });
+      await adapter.onReady();
+      expect(v1(adapter)).to.have.length(1);
+      expect(written(adapter, 'cockpit')).to.have.length(1);
+      expect(choice(adapter)).to.deep.equal({});
+      expect(cockpitDeletes(adapter)).to.deep.equal([]);
+      failing = false;
+      await adapter.updateDevices();
+      expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
+      await adapter.updateDevices();
+      // v2 answers again, so v1 is not asked any more
+      expect(v1(adapter)).to.have.length(1);
+    });
+  }
+
+  it('asks v1 while a kept v2 answers with server errors', async () => {
+    useClock();
+    let failing = false;
+    const adapter = setup({ '/v2/cars/VIN1/cockpit?': () => (failing ? httpError(502) : {}) });
+    await adapter.onReady();
+    expect(v1(adapter)).to.deep.equal([]);
+    failing = true;
+    await adapter.updateDevices();
+    expect(v1(adapter)).to.have.length(1);
+    expect(choice(adapter)).to.deep.equal({ VIN1: 'cockpitv2' });
+  });
+
+  for (const status of [401, 429]) {
     it(`asks no v1, decides nothing and deletes nothing when v2 answers ${status}`, async () => {
       useClock();
       let tokens = 0;
@@ -1448,16 +1583,37 @@ describe('remote objects', () => {
     expect(common(adapter, 'lastCommandError')).to.include({ type: 'string', role: 'text', read: true, write: false });
   });
 
-  it('updates states created by older versions', async () => {
+  it('updates states created by older versions and keeps their name', async () => {
     const adapter = setup();
     adapter.objects.set('renault.0.VIN1.remote.refreshAll', {
       _id: 'renault.0.VIN1.remote.refreshAll',
       type: 'state',
-      common: { name: 'True = Refresh Data', type: 'boolean', role: 'button', read: true, write: true },
+      common: { name: 'My refresh', type: 'boolean', role: 'state', read: true, write: true, custom: { 'history.0': {} } },
       native: {},
     });
     await adapter.onReady();
-    expect(common(adapter, 'refreshAll')).to.include({ name: 'Refresh all vehicle data', read: false });
+    expect(common(adapter, 'refreshAll')).to.include({ name: 'My refresh', role: 'button', read: false });
+    expect(common(adapter, 'refreshAll').custom).to.deep.equal({ 'history.0': {} });
+  });
+
+  it('keeps a renamed remote state and writes no unchanged object on the daily reload', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    await adapter.extendObjectAsync('VIN1.remote.climateStart', { common: { name: 'Heizung an' } });
+    const extend = sinon.spy(adapter, 'extendObjectAsync');
+    await adapter.getDeviceList();
+    expect(common(adapter, 'climateStart').name).to.equal('Heizung an');
+    expect(extend.getCalls().filter((call) => String(call.args[0]).includes('.remote.'))).to.deep.equal([]);
+  });
+
+  it('updates a changed range or state list of an existing remote state', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    await adapter.extendObjectAsync('VIN1.remote.chargeLimitMin', { common: { min: 0, max: 100 } });
+    await adapter.extendObjectAsync('VIN1.remote.chargeMode', { common: { states: { always: 'always' } } });
+    await adapter.getDeviceList();
+    expect(common(adapter, 'chargeLimitMin')).to.include({ min: 15, max: 45 });
+    expect(Object.keys(common(adapter, 'chargeMode').states)).to.have.length(4);
   });
 
   it('replaces the states of earlier versions once', async () => {
@@ -2006,6 +2162,21 @@ describe('charge limits', () => {
     expect(adapter.objects.has('renault.0.VIN1.remote.chargeLimitTarget')).to.equal(false);
   });
 
+  it('shows the limits the car reports in the remote states', async () => {
+    const adapter = await ready({ '/ev/soc-levels': { socMin: 15, socTarget: 100 } });
+    expect(adapter.states['VIN1.remote.chargeLimitMin']).to.equal(15);
+    expect(adapter.states['VIN1.remote.chargeLimitTarget']).to.equal(100);
+    expect(adapter.acks['VIN1.remote.chargeLimitMin']).to.equal(true);
+  });
+
+  for (const levels of [{ socMin: 10, socTarget: 105 }, { socMin: 17, socTarget: 99 }, { socMin: '20', socTarget: null }, {}]) {
+    it(`leaves the remote states alone when the car reports ${JSON.stringify(levels)}`, async () => {
+      const adapter = await ready({ '/ev/soc-levels': levels });
+      expect(adapter.states).to.not.have.property('VIN1.remote.chargeLimitMin');
+      expect(adapter.states).to.not.have.property('VIN1.remote.chargeLimitTarget');
+    });
+  }
+
   it('sends the new target with the known minimum and confirms it', async () => {
     const adapter = await ready();
     await write(adapter, 'chargeLimitTarget', 90);
@@ -2118,6 +2289,28 @@ describe('charge mode', () => {
     await adapter.setState(id, val, false);
     await adapter.onStateChange(id, userWrite(val));
   };
+
+  it('shows the charge mode the car reports', async () => {
+    const adapter = await ready(undefined, { '/charge-mode?': { data: { attributes: { chargeMode: 'always_charging' } } } });
+    expect(adapter.states['VIN1.remote.chargeMode']).to.equal('always_charging');
+    expect(adapter.acks['VIN1.remote.chargeMode']).to.equal(true);
+  });
+
+  for (const chargeMode of ['ALWAYS', '', 'toString', 7, null]) {
+    it(`does not show the reported charge mode ${JSON.stringify(chargeMode)}`, async () => {
+      const adapter = await ready(undefined, { '/charge-mode?': { data: { attributes: { chargeMode } } } });
+      expect(adapter.states).to.not.have.property('VIN1.remote.chargeMode');
+    });
+  }
+
+  it('writes no charge mode state without its object', async () => {
+    useClock();
+    const adapter = await ready(undefined, { '/charge-mode?': { data: { attributes: { chargeMode: 'always' } } } });
+    delete adapter.states['VIN1.remote.chargeMode'];
+    await adapter.delObjectAsync('VIN1.remote.chargeMode');
+    await adapter.updateDevices();
+    expect(adapter.states).to.not.have.property('VIN1.remote.chargeMode');
+  });
 
   for (const mode of ['always', 'always_charging', 'schedule_mode', 'scheduled']) {
     it(`sets the charge mode ${mode} and confirms it`, async () => {
@@ -2273,6 +2466,55 @@ describe('alerts', () => {
     await adapter.updateDevices();
     expect(adapter.objects.has('renault.0.VIN1.alerts.01.code')).to.equal(true);
     expect(adapter.objects.has('renault.0.VIN1.alerts.02.code')).to.equal(false);
+  });
+
+  it('keeps the objects of alerts that stay, with their history settings', async () => {
+    const now = useClock();
+    let answer = [{ code: 'A1' }, { code: 'B2' }];
+    const adapter = setup({ '/alerts?': () => answer });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    await adapter.extendObjectAsync('VIN1.alerts.01.code', { common: { custom: { 'history.0': { enabled: true } } } });
+    answer = [{ code: 'A1' }];
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(adapter.objects.get('renault.0.VIN1.alerts.01.code')?.common.custom).to.deep.equal({ 'history.0': { enabled: true } });
+    expect(adapter.deleted.filter((id) => id.startsWith('VIN1.alerts.01'))).to.deep.equal([]);
+    expect(adapter.deleted).to.include('VIN1.alerts.02');
+  });
+
+  it('removes every alert when the answer is empty, and nothing when the request fails', async () => {
+    const now = useClock();
+    /** @type {unknown} */
+    let answer = [{ code: 'A1' }];
+    const adapter = setup({ '/alerts?': () => answer });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    answer = httpError(503);
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(adapter.objects.has('renault.0.VIN1.alerts.01.code')).to.equal(true);
+    answer = [];
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(adapter.objects.has('renault.0.VIN1.alerts.01.code')).to.equal(false);
+    expect(adapter.objects.has('renault.0.VIN1.alerts.01')).to.equal(false);
+  });
+
+  it('creates the objects of an alert again when it comes back', async () => {
+    const now = useClock();
+    let answer = [{ code: 'A1' }, { code: 'B2' }];
+    const adapter = setup({ '/alerts?': () => answer });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    answer = [{ code: 'A1' }];
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    answer = [{ code: 'A1' }, { code: 'C3' }];
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(adapter.objects.has('renault.0.VIN1.alerts.02.code')).to.equal(true);
+    expect(adapter.states['VIN1.alerts.02.code']).to.equal('C3');
   });
 
   it('stores an object answer below the channel', async () => {
