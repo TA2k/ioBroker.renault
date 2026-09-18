@@ -1624,6 +1624,8 @@ describe('remote objects', () => {
       'charging',
       'refresh',
       'lastError',
+      'askForBatteryRefresh',
+      'askForClimateRefresh',
     ];
     const adapter = setup();
     for (const id of legacy) {
@@ -1637,8 +1639,6 @@ describe('remote objects', () => {
     await adapter.onReady();
     expect(deletedRemote(adapter)).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
     expect(remoteIds(adapter)).to.deep.equal([
-      'askForBatteryRefresh',
-      'askForClimateRefresh',
       'askForLocationRefresh',
       'chargeLimitMin',
       'chargeLimitTarget',
@@ -1672,11 +1672,11 @@ describe('remote objects', () => {
     const sorted = (...list) => list.sort();
     const always = ['lastCommandError', 'refreshAll'];
     const location = ['refreshLocation', 'askForLocationRefresh'];
-    const battery = ['refreshBattery', 'askForBatteryRefresh'];
-    const climate = ['refreshClimate', 'askForClimateRefresh'];
+    const battery = ['refreshBattery'];
+    const climate = ['refreshClimate'];
     const commands = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature'];
     // renault-api does not list charge-set-mode for the Zoe phase 2 and the XJA1VP, nor
-    // refresh-location or refresh-battery-status for any of these, so they get the default
+    // refresh-location for any of these, so they get the default
     expect(await ids('X102VE')).to.deep.equal(sorted('chargeMode', ...location, ...battery, ...climate, ...commands, ...always));
     expect(await ids('R5E1VE')).to.deep.equal(
       sorted(
@@ -2369,8 +2369,6 @@ describe('horn, lights and location', () => {
     ['hornStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'horn' } }],
     ['lightsStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'lights' } }],
     ['askForLocationRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-location?', { type: 'RefreshLocation' }],
-    ['askForBatteryRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-battery-status?', { type: 'RefreshBatteryStatus' }],
-    ['askForClimateRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-hvac-status?', { type: 'RefreshHvacStatus' }],
   ];
   /** @param {string} [code] model code of VIN1 */
   async function ready(code = undefined) {
@@ -2423,14 +2421,7 @@ describe('horn, lights and location', () => {
     const common = (id) => adapter.objects.get('renault.0.VIN1.remote.' + id)?.common;
     expect(common('hornStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
     expect(common('lightsStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
-    for (const id of [
-      'refreshLocation',
-      'askForLocationRefresh',
-      'refreshBattery',
-      'askForBatteryRefresh',
-      'refreshClimate',
-      'askForClimateRefresh',
-    ]) {
+    for (const id of ['refreshLocation', 'askForLocationRefresh', 'refreshBattery', 'refreshClimate']) {
       expect(common(id)).to.include({ type: 'boolean', role: 'button', read: false, write: true });
     }
     expect(common('hornStop')).to.equal(undefined);
@@ -2452,7 +2443,6 @@ describe('refresh buttons', () => {
   const SECOND = 1000;
   const MINUTE = 60 * SECOND;
   const LOCATION = '/cars/VIN1/location?';
-  const BATTERY = '/cars/VIN1/battery-status?';
   const kamereon = (adapter) => urls(adapter).filter((url) => url.includes('/kamereon/'));
   const posts = (adapter) =>
     adapter.requestClient
@@ -2499,11 +2489,7 @@ describe('refresh buttons', () => {
     expect(adapter.pollTimeout).to.equal(poll);
   });
 
-  for (const [path, action, endpoint, read] of [
-    ['askForLocationRefresh', '/actions/refresh-location?', LOCATION, 'location'],
-    ['askForBatteryRefresh', '/actions/refresh-battery-status?', BATTERY, 'battery-status'],
-    ['askForClimateRefresh', '/actions/refresh-hvac-status?', '/cars/VIN1/hvac-status?', 'hvac-status'],
-  ]) {
+  for (const [path, action, endpoint, read] of [['askForLocationRefresh', '/actions/refresh-location?', LOCATION, 'location']]) {
     it(`${path} asks the car, then reads only ${read} 30 seconds later`, async () => {
       const adapter = await started();
       const poll = adapter.pollTimeout;
@@ -2567,15 +2553,24 @@ describe('refresh buttons', () => {
     expect(pending(adapter, 'location').ms).to.equal(30 * SECOND);
   });
 
-  it('creates no battery buttons on a model without battery status', async () => {
+  it('creates no battery button on a model without battery status', async () => {
     const adapter = setup({ '/vehicles?': vehicleOf('XJA1VP') });
     await adapter.onReady();
     expect(adapter.objects.has('renault.0.VIN1.remote.refreshBattery')).to.equal(false);
-    expect(adapter.objects.has('renault.0.VIN1.remote.askForBatteryRefresh')).to.equal(false);
     adapter.requestClient.resetHistory();
-    await press(adapter, 'askForBatteryRefresh');
-    expect(posts(adapter)).to.deep.equal([]);
+    await press(adapter, 'refreshBattery');
+    expect(adapter.refreshTimeouts).to.deep.equal({});
     expect(adapter.states['VIN1.remote.lastCommandError']).to.include('not supported');
+  });
+
+  it('asks the car for nothing but the location', async () => {
+    const adapter = await started();
+    for (const path of ['askForBatteryRefresh', 'askForClimateRefresh']) {
+      expect(adapter.objects.has('renault.0.VIN1.remote.' + path)).to.equal(false);
+      await press(adapter, path);
+    }
+    expect(posts(adapter)).to.deep.equal([]);
+    expect(adapter.refreshTimeouts).to.deep.equal({});
   });
 
   it('replaces the default name of a test version and keeps a name the user gave', async () => {

@@ -103,9 +103,7 @@ Each vehicle is created as a device using its VIN. Remote commands are exposed a
 | `askForLocationRefresh` | boolean | `button`            | ask the car to upload its position, read the location 30 s later                            |
 | `refreshAll`            | boolean | `button`            | poll all vehicle data now                                                                   |
 | `refreshBattery`        | boolean | `button`            | read the battery status from the cloud now                                                  |
-| `askForBatteryRefresh`  | boolean | `button`            | ask the car to upload its battery status, read it 30 s later                                |
 | `refreshClimate`        | boolean | `button`            | read the climate control status (`hvac-status`) from the cloud now                          |
-| `askForClimateRefresh`  | boolean | `button`            | ask the car to upload its climate control status, read it 30 s later                        |
 | `lastCommandError`      | string  | `text`              | error of the last command, empty after a successful command                                 |
 
 A button is pressed by writing `true`. The adapter resets it to `false` with `ack: true` once the
@@ -118,12 +116,12 @@ from `soc-levels`. It is read once per hour; right after the start a write waits
 read. Both states show the limits the car reports, also after a change in the app.
 
 The `refresh…` buttons read only what the cloud holds; the car uploads by itself, for example after
-a change at the wallbox. The `askFor…` buttons first ask the car to upload its current data, which
-wakes its telematics unit; they read only when the cloud accepted that request, and the result is
-in `lastCommandError`. `askForBatteryRefresh` and `askForClimateRefresh` are not documented by
-renault-api, so whether a model supports them shows only when they are pressed. Do not press the `askFor…` buttons from a script in a
-tight loop, every press wakes the car and draws on its 12 V battery. Each button costs one read
-instead of a full poll, and the same data of a vehicle is read at most every three minutes.
+a change at the wallbox or when it is switched off. `askForLocationRefresh` first asks the car to
+upload its position, which wakes its telematics unit; it reads only when the cloud accepted that
+request, and the result is in `lastCommandError`. Do not press it from a script in a tight loop,
+every press wakes the car and draws on its 12 V battery. The car cannot be asked for its battery or
+climate control status: the Zoe phase 2 answers the refresh requests known from other projects with 404. Each button costs one read instead of a full poll, and the same data of a vehicle is read at
+most every three minutes.
 
 A script that follows the wallbox presses `refreshBattery` itself when the car has had time to
 upload, for example one minute after the wallbox changed. Frequent use of `refreshAll` can exhaust
@@ -195,7 +193,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) `chargingStart` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs, as the app does
 - (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it; the current limits are in the new channel `soc-levels`
 - (typhosj) set the charge mode with `remote.chargeMode`; it and the charge limit states show the values the car reports
-- (typhosj) new buttons `remote.hornStart` and `remote.lightsStart` on models that support them; `remote.refreshLocation`, `remote.refreshBattery` and `remote.refreshClimate` read only the location, the battery status or the climate control status from the cloud, and `remote.askForLocationRefresh`, `remote.askForBatteryRefresh` and `remote.askForClimateRefresh` first ask the car to upload it and read it 30 seconds later
+- (typhosj) new buttons `remote.hornStart` and `remote.lightsStart` on models that support them; `remote.refreshLocation`, `remote.refreshBattery` and `remote.refreshClimate` read only the location, the battery status or the climate control status from the cloud, and `remote.askForLocationRefresh` first asks the car to upload its position and reads it 30 seconds later
 - (typhosj) new channels `pressure` (tyre pressure in mbar) and `alerts` (Renault 5), read once per hour; a cleared alert is removed, the other alert states keep their history settings
 - (typhosj) the vehicle is named after its model without doubling it (`ZOE` instead of `ZOEZOE`); a name given by the user is kept
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"

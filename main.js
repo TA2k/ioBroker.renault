@@ -83,23 +83,9 @@ const REFRESH_RETRY_MS = 30 * 1000;
  */
 const REFRESH_BUTTONS = {
   refreshBattery: { name: 'Read the battery status from the cloud', path: 'battery-status', delayMs: 0 },
-  // Known limit: renault-api does not list refresh-battery-status and refresh-hvac-status, so no
-  // model is known to lack them; a car that rejects one reports the error in lastCommandError.
-  askForBatteryRefresh: {
-    name: 'Ask the car for its battery status, read it 30 seconds later',
-    path: 'battery-status',
-    delayMs: 30 * 1000,
-    action: 'actions/refresh-battery-status',
-    type: 'RefreshBatteryStatus',
-  },
   refreshClimate: { name: 'Read the climate control status from the cloud', path: 'hvac-status', delayMs: 0 },
-  askForClimateRefresh: {
-    name: 'Ask the car for its climate control status, read it 30 seconds later',
-    path: 'hvac-status',
-    delayMs: 30 * 1000,
-    action: 'actions/refresh-hvac-status',
-    type: 'RefreshHvacStatus',
-  },
+  // No ask button for battery and climate: actions/refresh-battery-status and refresh-hvac-status
+  // (kamereon-python) answer 404 err.func.wired.not-found on the Zoe phase 2, under v1 and v2.
   refreshLocation: { name: 'Read the location from the cloud', path: 'location', delayMs: 0 },
   askForLocationRefresh: {
     name: 'Ask the car for its location, read it 30 seconds later',
@@ -279,6 +265,8 @@ const LEGACY_REMOTE_IDS = {
   charging: 'chargingStart and chargingStop',
   refresh: 'refreshAll',
   lastError: 'lastCommandError',
+  askForBatteryRefresh: 'refreshBattery',
+  askForClimateRefresh: 'refreshClimate',
 };
 
 /** Default names of test versions whose meaning changed; such a name is replaced, a user's name is kept. */
