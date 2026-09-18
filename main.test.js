@@ -1683,6 +1683,25 @@ describe('model endpoint table', () => {
     expect(table.models.X102VE.endpoints['actions/charge-stop']).to.equal('kcm-pause-resume');
   });
 
+  it('matches the model table in the README', () => {
+    const { modelTable, replaceModelTable } = require('./tools/updateVehicleEndpoints');
+    const readme = require('node:fs').readFileSync(require.resolve('./README.md'), 'utf8');
+    expect(replaceModelTable(readme, modelTable(table.models))).to.equal(readme);
+  });
+
+  it('marks a column yes only when the model lists every key of it as supported', () => {
+    const { modelTable, replaceModelTable } = require('./tools/updateVehicleEndpoints');
+    const rows = modelTable({
+      A: { name: 'All', endpoints: { 'actions/horn-start': 'default', 'actions/lights-start': 'default' } },
+      B: { name: 'Half', endpoints: { 'actions/horn-start': 'default' } },
+      C: { name: 'None', endpoints: { 'actions/horn-start': 'default', 'actions/lights-start': null } },
+    }).split('\n');
+    const horn = (row) => row.split('|')[9].trim();
+    expect(rows.slice(2).map(horn)).to.deep.equal(['yes', '?', 'no']);
+    expect(horn(rows[0])).to.equal('Horn / lights');
+    expect(() => replaceModelTable('no markers', '')).to.throw('markers');
+  });
+
   it('parses the table of renault-api', () => {
     const { parseModels } = require('./tools/updateVehicleEndpoints');
     const source = [
