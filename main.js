@@ -189,6 +189,25 @@ const REMOTE_COMMANDS = {
       };
     },
   },
+  // horn and lights have no stop request, so the models get only a start button
+  horn: {
+    name: 'the horn',
+    start: 'actions/horn-start',
+    stop: 'actions/horn-start',
+    request: (mode, on) =>
+      on
+        ? { base: KCA, endpoint: 'actions/horn-lights', body: { type: 'HornLights', attributes: { action: 'start', target: 'horn' } } }
+        : null,
+  },
+  lights: {
+    name: 'flashing the lights',
+    start: 'actions/lights-start',
+    stop: 'actions/lights-start',
+    request: (mode, on) =>
+      on
+        ? { base: KCA, endpoint: 'actions/horn-lights', body: { type: 'HornLights', attributes: { action: 'start', target: 'lights' } } }
+        : null,
+  },
 };
 
 /**
@@ -741,6 +760,17 @@ class Renault extends utils.Adapter {
             unsupported.push('chargeMode');
           } else {
             remoteObjects.push({ id: 'chargeMode', name: 'Charge mode', type: 'string', role: 'text', states: CHARGE_MODES });
+          }
+          if (this.endpointMode(device.vin, 'actions/refresh-location') === null) {
+            unsupported.push('refreshLocation');
+          } else {
+            remoteObjects.push({
+              id: 'refreshLocation',
+              name: 'Ask the car for its current location',
+              type: 'boolean',
+              role: 'button',
+              read: false,
+            });
           }
           remoteObjects.push(
             { id: 'refreshAll', name: 'Refresh all vehicle data', type: 'boolean', role: 'button', read: false },
@@ -1461,6 +1491,18 @@ class Renault extends utils.Adapter {
       await this.setChargeMode(id, vin, state.val);
       return;
     }
+    if (path === 'refreshLocation') {
+      try {
+        if (state.val === true) {
+          await this.refreshLocation(vin);
+        } else if (state.val !== false) {
+          await this.reportCommandError(vin, path + ' is a button and takes true, got ' + JSON.stringify(state.val) + '. Nothing sent');
+        }
+      } finally {
+        await this.setState(id, false, true);
+      }
+      return;
+    }
     if (path === 'refreshBattery') {
       if (state.val === true) {
         this.log.debug('Battery refresh of ' + vin + ' requested');
@@ -1565,6 +1607,21 @@ class Renault extends utils.Adapter {
     }
     const body = { ...settings, programs: settings.programs.map((program) => ({ ...program, programActivationStatus: false })) };
     await this.sendCommand(vin, name, url, body);
+  }
+
+  /**
+   * The car uploads its position; the poll 20 seconds after the command fetches it.
+   *
+   * @param {string} vin
+   */
+  async refreshLocation(vin) {
+    if (this.endpointMode(vin, 'actions/refresh-location') === null) {
+      await this.reportCommandError(vin, 'refreshLocation is not supported on this model. Nothing sent');
+      return;
+    }
+    await this.sendCommand(vin, 'refreshLocation', this.kamereonUrl(KCA, vin, 'actions/refresh-location'), {
+      data: { type: 'RefreshLocation' },
+    });
   }
 
   /**

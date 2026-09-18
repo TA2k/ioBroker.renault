@@ -1492,9 +1492,12 @@ describe('remote objects', () => {
       'climateStart',
       'climateStop',
       'climateTemperature',
+      'hornStart',
       'lastCommandError',
+      'lightsStart',
       'refreshAll',
       'refreshBattery',
+      'refreshLocation',
     ]);
     const removals = logged(adapter.log.info).filter((line) => line.startsWith('Removed VIN1.remote.'));
     expect(removals).to.have.length(legacy.length);
@@ -1509,12 +1512,24 @@ describe('remote objects', () => {
       await adapter.onReady();
       return remoteIds(adapter);
     };
+    const sorted = (...list) => list.sort();
     const always = ['lastCommandError', 'refreshAll', 'refreshBattery'];
-    const all = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature', ...always];
-    // renault-api does not list charge-set-mode for the Zoe phase 2 and the XJA1VP, so they get the default
-    expect(await ids('X102VE')).to.deep.equal(['chargeMode', ...all]);
-    expect(await ids('R5E1VE')).to.deep.equal(['chargeLimitMin', 'chargeLimitTarget', ...all.filter((id) => id !== 'chargingStop')]);
-    expect(await ids('XJA1VP')).to.deep.equal(['chargeMode', ...always]);
+    const commands = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature'];
+    // renault-api does not list charge-set-mode for the Zoe phase 2 and the XJA1VP, nor
+    // refresh-location for any of these, so they get the default
+    expect(await ids('X102VE')).to.deep.equal(sorted('chargeMode', 'refreshLocation', ...commands, ...always));
+    expect(await ids('R5E1VE')).to.deep.equal(
+      sorted(
+        'chargeLimitMin',
+        'chargeLimitTarget',
+        'hornStart',
+        'lightsStart',
+        'refreshLocation',
+        ...commands.filter((id) => id !== 'chargingStop'),
+        ...always,
+      ),
+    );
+    expect(await ids('XJA1VP')).to.deep.equal(sorted('chargeMode', 'refreshLocation', ...always));
   });
 
   it('removes command states the model does not support', async () => {
@@ -2101,6 +2116,81 @@ describe('charge mode', () => {
     const adapter = await ready('R5E1VE');
     expect(adapter.objects.has('renault.0.VIN1.remote.chargeMode')).to.equal(false);
     await adapter.onStateChange('renault.0.VIN1.remote.chargeMode', userWrite('always'));
+    expect(posts(adapter)).to.deep.equal([]);
+  });
+});
+
+describe('horn, lights and location', () => {
+  const HORN_LIGHTS = '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/horn-lights?';
+  /** @type {[string, string, object][]} button, url, body */
+  const cases = [
+    ['hornStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'horn' } }],
+    ['lightsStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'lights' } }],
+    ['refreshLocation', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-location?', { type: 'RefreshLocation' }],
+  ];
+  /** @param {string} [code] model code of VIN1 */
+  async function ready(code = undefined) {
+    const adapter = setup(code ? { '/vehicles?': vehicleOf(code) } : {});
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+  const posts = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .filter((request) => request.method === 'post');
+  const write = async (adapter, path, val) => {
+    const id = 'renault.0.VIN1.remote.' + path;
+    await adapter.setState(id, val, false);
+    await adapter.onStateChange(id, userWrite(val));
+  };
+
+  for (const [path, url, body] of cases) {
+    it(`sends ${path} and resets the button`, async () => {
+      const adapter = await ready();
+      await write(adapter, path, true);
+      expect(posts(adapter)).to.have.length(1);
+      expect(posts(adapter)[0].url).to.include(url);
+      expect(posts(adapter)[0].data).to.deep.equal({ data: body });
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(false);
+      expect(adapter.acks['VIN1.remote.' + path]).to.equal(true);
+    });
+
+    it(`ignores ${path} = false`, async () => {
+      const adapter = await ready();
+      await write(adapter, path, false);
+      expect(posts(adapter)).to.deep.equal([]);
+    });
+
+    for (const val of [1, 'true', null]) {
+      it(`sends nothing for ${path} = ${JSON.stringify(val)} and reports it`, async () => {
+        const adapter = await ready();
+        await write(adapter, path, val);
+        expect(posts(adapter)).to.deep.equal([]);
+        expect(adapter.states['VIN1.remote.lastCommandError']).to.include(path);
+        expect(adapter.states['VIN1.remote.' + path]).to.equal(false);
+      });
+    }
+  }
+
+  it('creates start buttons for horn and lights and a button for the location', async () => {
+    const adapter = await ready();
+    const common = (id) => adapter.objects.get('renault.0.VIN1.remote.' + id)?.common;
+    expect(common('hornStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
+    expect(common('lightsStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
+    expect(common('refreshLocation')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
+    expect(common('hornStop')).to.equal(undefined);
+    expect(common('lightsStop')).to.equal(undefined);
+  });
+
+  // renault-api marks no model as without refresh-location, so only horn and lights can be missing
+  it('creates no horn or lights button on a model without them', async () => {
+    const adapter = await ready('XJA1VP');
+    for (const path of ['hornStart', 'lightsStart']) {
+      expect(adapter.objects.has('renault.0.VIN1.remote.' + path), path).to.equal(false);
+      await write(adapter, path, true);
+    }
     expect(posts(adapter)).to.deep.equal([]);
   });
 });

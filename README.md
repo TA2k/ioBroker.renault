@@ -38,6 +38,9 @@ Each vehicle is created as a device using its VIN. Remote commands are exposed a
 | `chargeLimitMin`     | number  | `level`             | minimum charge level in %, 15 to 45 in steps of 5                                                            |
 | `chargeLimitTarget`  | number  | `level`             | target charge level in %, 55 to 100 in steps of 5                                                            |
 | `chargeMode`         | string  | `text`              | `always`, `always_charging`, `schedule_mode` or `scheduled`; the current mode is in `charge-mode.chargeMode` |
+| `hornStart`          | boolean | `button.start`      | sound the horn                                                                                               |
+| `lightsStart`        | boolean | `button.start`      | flash the lights                                                                                             |
+| `refreshLocation`    | boolean | `button`            | ask the car for its position; `location` updates with the poll 20 s later                                    |
 | `refreshAll`         | boolean | `button`            | poll all vehicle data now                                                                                    |
 | `refreshBattery`     | boolean | `button`            | ask only the battery status, one minute later                                                                |
 | `lastCommandError`   | string  | `text`              | error of the last command, empty after a successful command                                                  |
@@ -95,6 +98,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) new buttons `remote.hornStart`, `remote.lightsStart` and `remote.refreshLocation` on models that support them
 - (typhosj) set the charge mode with `remote.chargeMode` (`always`, `always_charging`, `schedule_mode`, `scheduled`)
 - (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it (Megane E-Tech, Scenic E-Tech, Renault 4, Renault 5, Alpine A290, Master E-Tech); the current limits are read once per hour into `soc-levels`
 - (typhosj) new channel `pressure` with the tyre pressure per wheel in mbar, read once per hour on models that report it
