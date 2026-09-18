@@ -166,38 +166,26 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
-- (typhosj) new channel `alerts` with the alerts of the car (Renault 5), read once per hour
-- (typhosj) new buttons `remote.hornStart`, `remote.lightsStart` and `remote.refreshLocation` on models that support them
-- (typhosj) set the charge mode with `remote.chargeMode` (`always`, `always_charging`, `schedule_mode`, `scheduled`)
-- (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it (Megane E-Tech, Scenic E-Tech, Renault 4, Renault 5, Alpine A290, Master E-Tech); the current limits are read once per hour into `soc-levels`
-- (typhosj) new channel `pressure` with the tyre pressure per wheel in mbar, read once per hour on models that report it
-- (typhosj) **Breaking change:** the remote states are renamed and are buttons for every model. `hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature`, `charging` becomes `chargingStart` and `chargingStop`, `refresh` becomes `refreshAll`, `lastError` becomes `lastCommandError`. The old states are removed on the first start and the target temperature is taken over. Adjust scripts and visualizations.
-- (typhosj) new button `remote.refreshBattery` asks only the battery status, one minute later and at most every three minutes, for scripts that follow the wallbox
-- (typhosj) an endpoint that has answered with server errors for 24 hours is asked only hourly until it answers again
-- (typhosj) `hvac-temperature` starts at 21 °C instead of empty
-- (typhosj) the refresh button, and `charging` on models that cannot stop charging, are reset to false with ack after they were handled
-- (typhosj) an endpoint that answers with only a message and no data (cockpit v2 on the Zoe phase 2) counts as not supported
-- (typhosj) a server error (5xx) is logged as warning once per endpoint and vehicle, with the endpoint name; repeats go to the debug log until the endpoint answers again
-- (typhosj) breaking: `actions/hvac-start` is renamed to `hvac-start`, and `actions/charging-start`, `charge/pause-resume` and `charge/start` are replaced by one state `charging`; the old states are removed, scripts and visualizations need the new names
-- (typhosj) commands and polled data follow the endpoint table of renault-api per model: `charging` and the climate control stop send the request the model needs, and commands or data the model does not offer are not created or polled
-- (typhosj) `charging` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs
-- (typhosj) breaking: battery, range, mileage, fuel and temperature states get units and specific roles, and data states are read-only
-- (typhosj) breaking: the command states use the roles switch, button.start and level.temperature instead of button and value
-- (typhosj) commands are confirmed with ack after the cloud accepted them, and errors are written to remote.lastError
+- (typhosj) **Breaking change:** the remote states are renamed and every command is a button. `actions/hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature` (default 21 °C, a valid old value is taken over), `actions/charging-start`, `charge/pause-resume` and `charge/start` become `chargingStart` and `chargingStop`, and `refresh` becomes `refreshAll`. The old states are removed on the first start. Adjust scripts and visualizations
+- (typhosj) **Breaking change:** only one cockpit version is polled per vehicle (v2 if it answers, else v1), and its data is always written to `cockpit`; the `cockpitv2` channel is removed
+- (typhosj) **Breaking change:** battery, range, mileage, fuel and temperature states get units and specific roles, and data states are read-only
+- (typhosj) **Breaking change:** the update interval is at least 5 minutes (15 minutes for new installations)
+- (typhosj) commands and polled data follow the endpoint table of renault-api per model: each command sends the request the model needs, and commands or data the model does not offer are neither created nor polled
+- (typhosj) commands are confirmed with ack once the Renault cloud accepted them, and `remote.lastCommandError` holds the error of the last command
+- (typhosj) `chargingStart` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs, as the app does
+- (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it; the current limits are in the new channel `soc-levels`
+- (typhosj) set the charge mode with `remote.chargeMode`
+- (typhosj) new buttons `remote.hornStart`, `remote.lightsStart` and `remote.refreshLocation` on models that support them, and `remote.refreshBattery`, which asks only the battery status for scripts that follow the wallbox
+- (typhosj) new channels `pressure` (tyre pressure in mbar) and `alerts` (Renault 5), read once per hour
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
-- (typhosj) breaking: only one cockpit version is polled per vehicle (v2 if it answers, else v1), and its data is always written to `<vin>.cockpit`; the `cockpitv2` channel is removed once
-- (typhosj) an endpoint the car rejected is asked again once a day, so a temporary 403 no longer disables it until restart
-- (typhosj) the charge history is fetched once per hour instead of on every poll, and the adapter warns once when its requests exceed Renault's quota of about 60 per hour
-- (typhosj) an expired token during a poll stops the poll, refreshes the token once and repeats the poll once
-- (typhosj) after a failed token refresh the adapter logs in again with growing delay and restarts polling once, instead of trying a single time
-- (typhosj) when Renault's request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint
-- (typhosj) login and requests use the country from the settings instead of always Germany; an invalid country falls back to de
+- (typhosj) fewer requests against Renault's quota of about 60 per hour: slow-changing data such as the charge history is fetched once per hour, and the adapter warns once when its settings need more requests than the quota allows
+- (typhosj) when the request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint
+- (typhosj) an expired token during a poll is refreshed and the poll repeated once; after a failed token refresh the adapter logs in again with growing delay
+- (typhosj) an endpoint the car rejected is asked again once a day instead of never until restart; an answer without data counts as not supported; an endpoint with server errors for 24 hours is asked only hourly, and its server error is logged once as warning
+- (typhosj) login and requests use the country from the settings instead of always Germany
 - (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning
-- (typhosj) polls no longer overlap: a manual refresh or a command during a running poll waits for it
-- (typhosj) the update interval is at least 5 minutes (15 minutes for new installations), and the adapter only listens to its remote states
-- (typhosj) requests to the Renault cloud time out after 30 seconds, so one unanswered request no longer stalls polling
+- (typhosj) polls no longer overlap, requests time out after 30 seconds, no timer survives a stop of the instance, and the adapter only listens to its remote states
 - (typhosj) the adapter icon and readme links point to the `main` branch again
-- (typhosj) timers are managed by the adapter, so none survives a stop of the instance
 - (typhosj) lint uses the shared `@iobroker/eslint-config`; dependencies updated
 
 ### 0.0.25
