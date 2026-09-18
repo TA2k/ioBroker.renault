@@ -1697,9 +1697,32 @@ describe('model endpoint table', () => {
       C: { name: 'None', endpoints: { 'actions/horn-start': 'default', 'actions/lights-start': null } },
     }).split('\n');
     const horn = (row) => row.split('|')[9].trim();
-    expect(rows.slice(2).map(horn)).to.deep.equal(['yes', '?', 'no']);
-    expect(horn(rows[0])).to.equal('Horn / lights');
+    expect(rows.slice(4).map(horn)).to.deep.equal(['yes', '?', 'no']);
+    expect(horn(rows[2])).to.equal('Horn / lights');
     expect(() => replaceModelTable('no markers', '')).to.throw('markers');
+  });
+
+  it('groups the model table by brand, with Renault for models named without one', () => {
+    const { modelTable } = require('./tools/updateVehicleEndpoints');
+    const names = ['Alpine A290', 'DACIA SPRING', 'ZOE phase 2', 'Dacia Duster III', 'Renault 5', 'Daciaville'];
+    const table = modelTable(Object.fromEntries(names.map((name, index) => ['C' + index, { name, endpoints: {} }])));
+    /** @type {Record<string, string[]>} */
+    const byBrand = {};
+    let brand = '';
+    for (const line of table.split('\n')) {
+      if (line.startsWith('### ')) {
+        brand = line.slice(4);
+        byBrand[brand] = [];
+      } else if (/ \| C\d /.test(line)) {
+        byBrand[brand].push(line.split('|')[1].trim());
+      }
+    }
+    expect(byBrand).to.deep.equal({
+      Renault: ['Daciaville', 'Renault 5', 'ZOE phase 2'],
+      Dacia: ['Dacia Duster III', 'DACIA SPRING'],
+      Alpine: ['Alpine A290'],
+    });
+    expect(modelTable({})).to.equal('');
   });
 
   it('parses the table of renault-api', () => {

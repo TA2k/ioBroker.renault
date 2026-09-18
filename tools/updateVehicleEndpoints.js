@@ -96,8 +96,16 @@ function parseModels(source) {
   return models;
 }
 
+/** Brands in README order; renault-api names Dacia and Alpine models with the brand, Renault models mostly not. */
+const BRANDS = ['Renault', 'Dacia', 'Alpine'];
+
+/** @param {string} name model name from renault-api */
+function brandOf(name) {
+  return BRANDS.find((brand) => name.toLowerCase().startsWith(brand.toLowerCase() + ' ')) ?? 'Renault';
+}
+
 /**
- * Markdown table of the supported features per model, padded the way prettier pads it.
+ * Markdown tables of the supported features per model, one per brand, padded the way prettier pads them.
  *
  * @param {Record<string, { name: string, endpoints: Record<string, string | null> }>} models
  */
@@ -106,15 +114,32 @@ function modelTable(models) {
     const modes = keys.map((key) => (Object.hasOwn(endpoints, key) ? endpoints[key] : undefined));
     return modes.includes(null) ? 'no' : modes.includes(undefined) ? '?' : 'yes';
   };
-  const rows = [
-    ['Model', 'Code', ...COLUMNS.map(([title]) => title)],
-    ...Object.entries(models)
-      .sort(([, a], [, b]) => a.name.localeCompare(b.name, 'en'))
-      .map(([code, model]) => [model.name.replaceAll('|', '/'), code, ...COLUMNS.map(([, keys]) => cell(model.endpoints, keys))]),
-  ];
-  const widths = rows[0].map((_, column) => Math.max(...rows.map((row) => row[column].length)));
-  const line = (row) => '| ' + row.map((text, column) => text.padEnd(widths[column])).join(' | ') + ' |';
-  return [line(rows[0]), '| ' + widths.map((width) => '-'.repeat(width)).join(' | ') + ' |', ...rows.slice(1).map(line)].join('\n');
+  const header = ['Model', 'Code', ...COLUMNS.map(([title]) => title)];
+  const sorted = Object.entries(models).sort(([, a], [, b]) => a.name.localeCompare(b.name, 'en'));
+  const sections = [];
+  for (const brand of BRANDS) {
+    const rows = [
+      header,
+      ...sorted
+        .filter(([, model]) => brandOf(model.name) === brand)
+        .map(([code, model]) => [model.name.replaceAll('|', '/'), code, ...COLUMNS.map(([, keys]) => cell(model.endpoints, keys))]),
+    ];
+    if (rows.length === 1) {
+      continue;
+    }
+    const widths = header.map((_, column) => Math.max(...rows.map((row) => row[column].length)));
+    const line = (row) => '| ' + row.map((text, column) => text.padEnd(widths[column])).join(' | ') + ' |';
+    sections.push(
+      [
+        '### ' + brand,
+        '',
+        line(header),
+        '| ' + widths.map((width) => '-'.repeat(width)).join(' | ') + ' |',
+        ...rows.slice(1).map(line),
+      ].join('\n'),
+    );
+  }
+  return sections.join('\n\n');
 }
 
 /**
