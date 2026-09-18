@@ -34,7 +34,7 @@ function loadChecker() {
 async function buildDump() {
   const { createTestAdapter, fixtureRoutes, VEHICLE } = require('../test/fakeAdapter');
   const Json2iob = require('json2iob');
-  // The command roles depend on the model: charging is a switch on the Zoe and a start button on the R5.
+  // The remote states and polled channels depend on the model, so the dump holds a Zoe phase 2 and a Renault 5.
   const vehicle = (vin, code) => ({ ...VEHICLE, vin, vehicleDetails: { ...VEHICLE.vehicleDetails, model: { code, label: ' ' + code } } });
   const adapter = createTestAdapter({
     ...fixtureRoutes(),
@@ -42,7 +42,6 @@ async function buildDump() {
   });
   adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
   await adapter.onReady();
-  await adapter.onStateChange('renault.0.VIN1.remote.charging', /** @type {any} */ ({ val: true, ack: false }));
 
   /** @type {Record<string, any>} */
   const dump = {};
