@@ -186,6 +186,125 @@ describe('refresh command', () => {
   });
 });
 
+describe('battery refresh', () => {
+  const MINUTE = 60 * 1000;
+  const kamereon = (adapter) => urls(adapter).filter((url) => url.includes('/kamereon/'));
+  const press = (adapter, vin = 'VIN1') => adapter.onStateChange('renault.0.' + vin + '.remote.refreshBattery', userWrite(true));
+  /** The pending battery refresh timer of the vehicle */
+  const pending = (adapter, vin = 'VIN1') => adapter.batteryRefreshTimeouts[vin];
+
+  async function started(routes) {
+    const adapter = setup(routes);
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+
+  it('resets the button at once and asks only battery-status of that vehicle one minute later', async () => {
+    useClock();
+    const adapter = await started({ '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] } });
+    await press(adapter);
+    expect(adapter.states['VIN1.remote.refreshBattery']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refreshBattery']).to.equal(true);
+    expect(kamereon(adapter)).to.deep.equal([]);
+    expect(pending(adapter).ms).to.equal(MINUTE);
+    await pending(adapter).fn();
+    expect(kamereon(adapter)).to.have.length(1);
+    expect(kamereon(adapter)[0]).to.include('/cars/VIN1/battery-status');
+  });
+
+  it('merges presses within the minute into one request after the last press', async () => {
+    const now = useClock();
+    const adapter = await started();
+    await press(adapter);
+    const first = pending(adapter);
+    now.tick(30 * 1000);
+    await press(adapter);
+    expect(adapter.clearTimeout.calledWith(first)).to.equal(true);
+    expect(pending(adapter).ms).to.equal(MINUTE);
+    await pending(adapter).fn();
+    expect(kamereon(adapter)).to.have.length(1);
+  });
+
+  it('keeps three minutes between two battery refreshes of a vehicle', async () => {
+    const now = useClock();
+    const adapter = await started();
+    await press(adapter);
+    now.tick(MINUTE);
+    await pending(adapter).fn();
+    now.tick(30 * 1000);
+    await press(adapter);
+    expect(pending(adapter).ms).to.equal(3 * MINUTE - 30 * 1000);
+    now.tick(3 * MINUTE);
+    await press(adapter);
+    expect(pending(adapter).ms).to.equal(MINUTE);
+  });
+
+  it('keeps no pending timer after the refresh ran', async () => {
+    useClock();
+    const adapter = await started();
+    await press(adapter);
+    await pending(adapter).fn();
+    expect(pending(adapter)).to.equal(undefined);
+  });
+
+  it('asks nothing during the request quota pause', async () => {
+    useClock();
+    const adapter = await started();
+    adapter.quotaPausedUntil = Date.now() + 15 * MINUTE;
+    await press(adapter);
+    await pending(adapter).fn();
+    expect(kamereon(adapter)).to.deep.equal([]);
+  });
+
+  it('asks nothing while a full poll runs, that poll brings the battery status', async () => {
+    useClock();
+    const adapter = await started();
+    adapter.polling = true;
+    await press(adapter);
+    await pending(adapter).fn();
+    expect(kamereon(adapter)).to.deep.equal([]);
+  });
+
+  it('refreshes the token once and asks battery-status again after a 401', async () => {
+    useClock();
+    let expired = true;
+    const adapter = await started();
+    adapter.requestClient = setup({ '/battery-status': () => (expired ? ((expired = false), httpError(401)) : {}) }).requestClient;
+    await press(adapter);
+    await pending(adapter).fn();
+    expect(kamereon(adapter)).to.have.length(2);
+    expect(kamereon(adapter).every((url) => url.includes('/cars/VIN1/battery-status'))).to.equal(true);
+  });
+
+  it('does not change the hourly schedule or the request budget', async () => {
+    useClock();
+    const adapter = await started();
+    const lastHourlyPoll = adapter.lastHourlyPoll;
+    await press(adapter);
+    await pending(adapter).fn();
+    expect(adapter.lastHourlyPoll).to.equal(lastHourlyPoll);
+  });
+
+  it('ignores a write that is not true and a vehicle that does not exist', async () => {
+    useClock();
+    const adapter = await started();
+    await adapter.onStateChange('renault.0.VIN1.remote.refreshBattery', userWrite(false));
+    await adapter.onStateChange('renault.0.VIN1.remote.refreshBattery', userWrite('true'));
+    await press(adapter, 'OTHER');
+    expect(adapter.batteryRefreshTimeouts).to.deep.equal({});
+  });
+
+  it('clears a pending battery refresh on unload', async () => {
+    useClock();
+    const adapter = await started();
+    await press(adapter);
+    const timer = pending(adapter);
+    adapter.onUnload(() => {});
+    expect(adapter.clearTimeout.calledWith(timer)).to.equal(true);
+  });
+});
+
 describe('server errors', () => {
   const warnings = (adapter) => logged(adapter.log.warn).filter((line) => line.includes('server error'));
 
@@ -1284,6 +1403,7 @@ describe('remote objects', () => {
       write: true,
     });
     expect(common(adapter, 'refresh')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
+    expect(common(adapter, 'refreshBattery')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
     expect(common(adapter, 'lastError')).to.include({ type: 'string', role: 'text', read: true, write: false });
   });
 

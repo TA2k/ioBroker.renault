@@ -34,7 +34,13 @@ Each vehicle is created as a device using its VIN. Remote commands are exposed a
 | `hvac-temperature` | number  | `level.temperature`        | target temperature in °C for the next start (default 21)    |
 | `charging`         | boolean | `switch` or `button.start` | `true` = start, `false` = stop charging (see below)         |
 | `refresh`          | boolean | `button`                   | `true` = poll the vehicle data now                          |
+| `refreshBattery`   | boolean | `button`                   | `true` = ask only the battery status, one minute later      |
 | `lastError`        | string  | `text`                     | error of the last command, empty after a successful command |
+
+`refreshBattery` is meant for scripts that follow the wallbox: it costs one request instead of a
+full poll. It waits one minute, so the car has time to upload its new state, merges all presses in
+that minute, and asks the battery status of a vehicle at most every three minutes. Frequent use of
+`refresh` can exhaust the request quota of the account, which also blocks the My Renault app.
 
 A command state is set to the written value with `ack: true` once the Renault cloud accepted the
 command. The car carries it out afterwards; the data states show the result after the next poll.
@@ -66,6 +72,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) new button `remote.refreshBattery` asks only the battery status, one minute later and at most every three minutes, for scripts that follow the wallbox
 - (typhosj) an endpoint that has answered with server errors for 24 hours is asked only hourly until it answers again
 - (typhosj) `hvac-temperature` starts at 21 °C instead of empty
 - (typhosj) the refresh button, and `charging` on models that cannot stop charging, are reset to false with ack after they were handled

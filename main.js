@@ -56,6 +56,9 @@ const DAY_MS = 24 * HOUR_MS;
 // Home Assistant limits its Renault integration to 60 requests per hour for the same reason.
 const QUOTA_PER_HOUR = 60;
 const DEFAULT_TEMPERATURE = 21;
+/** The car needs some time to upload its new state after a change at the wallbox. */
+const BATTERY_REFRESH_DELAY_MS = 60 * 1000;
+const BATTERY_REFRESH_GAP_MS = 3 * 60 * 1000;
 
 /** @typedef {{ path: string, url: string, desc: string, channel?: string, isHistory?: boolean, hourly?: boolean }} Endpoint */
 
@@ -240,6 +243,10 @@ class Renault extends utils.Adapter {
     this.budgetChecked = false;
     /** @type {Record<string, 'cockpit' | 'cockpitv2'>} */
     this.cockpitChoice = {};
+    /** @type {Record<string, ioBroker.Timeout | undefined>} vin -> pending battery refresh */
+    this.batteryRefreshTimeouts = {};
+    /** @type {Record<string, number>} vin -> time of the last battery refresh */
+    this.lastBatteryRefresh = {};
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -392,6 +399,33 @@ class Renault extends utils.Adapter {
   schedulePoll(delayMs) {
     this.pollTimeout && this.clearTimeout(this.pollTimeout);
     this.pollTimeout = this.setTimeout(() => this.runPoll().catch((error) => this.log.error('Poll failed: ' + error)), delayMs);
+  }
+
+  /**
+   * Ask battery-status of one vehicle one minute after the last call, and at most every three
+   * minutes. A script that follows the wallbox so costs one request instead of a full poll.
+   *
+   * @param {string} vin
+   */
+  scheduleBatteryRefresh(vin) {
+    this.batteryRefreshTimeouts[vin] && this.clearTimeout(this.batteryRefreshTimeouts[vin]);
+    const due = Math.max(Date.now() + BATTERY_REFRESH_DELAY_MS, (this.lastBatteryRefresh[vin] ?? -Infinity) + BATTERY_REFRESH_GAP_MS);
+    this.batteryRefreshTimeouts[vin] = this.setTimeout(async () => {
+      delete this.batteryRefreshTimeouts[vin];
+      // a running poll asks battery-status anyway
+      if (this.polling) {
+        return;
+      }
+      this.lastBatteryRefresh[vin] = Date.now();
+      this.polling = true;
+      try {
+        await this.updateDevices(false, { vin, path: 'battery-status' });
+      } catch (error) {
+        this.log.error('Battery refresh failed: ' + error);
+      } finally {
+        this.polling = false;
+      }
+    }, due - Date.now());
   }
 
   /** Run one poll cycle unless one is already running. */
@@ -639,6 +673,13 @@ class Renault extends utils.Adapter {
           }
           remoteObjects.push(
             { id: 'refresh', name: 'Refresh vehicle data', type: 'boolean', role: 'button', read: false },
+            {
+              id: 'refreshBattery',
+              name: 'Refresh only the battery status, one minute later',
+              type: 'boolean',
+              role: 'button',
+              read: false,
+            },
             { id: 'lastError', name: 'Error of the last command, empty after a success', type: 'string', role: 'text', write: false },
           );
           const removed = [
@@ -718,8 +759,9 @@ class Renault extends utils.Adapter {
 
   /**
    * @param {boolean} [isRetry] true for the single repeat after a token refresh
+   * @param {{ vin: string, path: string }} [only] ask just this endpoint of this vehicle
    */
-  async updateDevices(isRetry = false) {
+  async updateDevices(isRetry = false, only) {
     if (!this.account?.accountId) {
       this.log.error('No accountId found');
       return;
@@ -883,8 +925,11 @@ class Renault extends utils.Adapter {
       'accept-language': this.locale.toLowerCase(),
       'x-gigya-id_token': this.session.id_token,
     };
-    for (const vin of this.deviceArray) {
+    for (const vin of only ? [only.vin] : this.deviceArray) {
       for (const element of statusArray) {
+        if (only && element.path !== only.path) {
+          continue;
+        }
         if (!this.isPolled(vin, element, now, hourlyDue)) {
           continue;
         }
@@ -900,13 +945,16 @@ class Renault extends utils.Adapter {
           }
           this.log.info('Token expired during the poll, refreshing it');
           if (await this.refreshToken()) {
-            await this.updateDevices(true);
+            await this.updateDevices(true, only);
           }
           return;
         }
       }
     }
     this.quotaStrikes = 0;
+    if (only) {
+      return;
+    }
     if (hourlyDue) {
       this.lastHourlyPoll = now;
     }
@@ -1268,6 +1316,7 @@ class Renault extends utils.Adapter {
       this.setState('info.connection', false, true);
       this.pollTimeout && this.clearTimeout(this.pollTimeout);
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
+      Object.values(this.batteryRefreshTimeouts).forEach((timer) => timer && this.clearTimeout(timer));
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       this.vehicleListInterval && this.clearInterval(this.vehicleListInterval);
       callback();
@@ -1301,6 +1350,14 @@ class Renault extends utils.Adapter {
     }
     if (!this.account) {
       this.log.error('No account found');
+      return;
+    }
+    if (path === 'refreshBattery') {
+      if (state.val === true) {
+        this.log.debug('Battery refresh of ' + vin + ' requested');
+        this.scheduleBatteryRefresh(vin);
+      }
+      await this.setState(id, false, true);
       return;
     }
     if (path === 'refresh') {
