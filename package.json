@@ -34,7 +34,6 @@
     "@alcalzone/release-script": "^5.2.1",
     "@alcalzone/release-script-plugin-iobroker": "^5.2.0",
     "@alcalzone/release-script-plugin-license": "^5.2.2",
-    "@alcalzone/release-script-plugin-manual-review": "^5.2.0",
     "@iobroker/adapter-dev": "^1.5.0",
     "@iobroker/eslint-config": "^2.3.4",
     "@iobroker/testing": "^6.2.2",
@@ -65,7 +64,9 @@
     "pr:objects": "npx --yes --package @iobroker/repochecker -- node tools/checkObjectStructure.js",
     "lint": "eslint .",
     "translate": "translate-adapter",
-    "release": "release-script --all"
+    "release": "release-script patch --yes --noPush",
+    "release-minor": "release-script minor --yes --noPush",
+    "release-major": "release-script major --yes --noPush"
   },
   "bugs": {
     "url": "https://github.com/TA2k/ioBroker.renault/issues"
