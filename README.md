@@ -62,6 +62,18 @@ in `general.vehicleDetails.model.code`):
 - A model renault-api does not list yet gets the default requests: every command and endpoint is tried,
   and unsupported endpoints are asked again once a day.
 
+## Vehicle data
+
+The data of each endpoint is written to a channel below `renault.0.<VIN>`, named after the
+endpoint, for example `battery-status`, `cockpit` and `hvac-status`. Most are asked on every
+poll; these change slowly and are asked once per hour:
+
+| Channel          | Content                                           |
+| ---------------- | ------------------------------------------------- |
+| `charge-history` | charges per day                                   |
+| `charges`        | single charges                                    |
+| `pressure`       | tyre pressure per wheel in mbar and a status code |
+
 ## Discussion / questions
 
 ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-0-x>
@@ -75,6 +87,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) new channel `pressure` with the tyre pressure per wheel in mbar, read once per hour on models that report it
 - (typhosj) **Breaking change:** the remote states are renamed and are buttons for every model. `hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature`, `charging` becomes `chargingStart` and `chargingStop`, `refresh` becomes `refreshAll`, `lastError` becomes `lastCommandError`. The old states are removed on the first start and the target temperature is taken over. Adjust scripts and visualizations.
 - (typhosj) new button `remote.refreshBattery` asks only the battery status, one minute later and at most every three minutes, for scripts that follow the wallbox
 - (typhosj) an endpoint that has answered with server errors for 24 hours is asked only hourly until it answers again

@@ -924,8 +924,8 @@ describe('request budget', () => {
     const check = sinon.spy(adapter, 'checkRequestBudget');
     await adapter.onReady();
     await adapter.updateDevices();
-    // 11 non-history endpoints minus the ignored lock-status and minus cockpit v1, plus the two hourly history endpoints
-    expect(check.args).to.deep.equal([[9, 2]]);
+    // 11 non-hourly endpoints minus the ignored lock-status and minus cockpit v1, plus the hourly history and pressure
+    expect(check.args).to.deep.equal([[9, 3]]);
     expect(budget(adapter)).to.have.length(1);
   });
 
@@ -1568,6 +1568,7 @@ describe('vehicle data objects', () => {
     charges: ['charges.json'],
     'charging-settings': ['charging-settings.single.json'],
     'res-state': ['res-state.1.json'],
+    pressure: ['pressure.json'],
   };
   for (const [path, files] of Object.entries(FIXTURES)) {
     for (const file of files) {
@@ -1648,8 +1649,8 @@ describe('model endpoint table', () => {
     const adapter = setup({ '/vehicles?': vehicleOf('X102VE') });
     const check = sinon.spy(adapter, 'checkRequestBudget');
     await adapter.onReady();
-    // 11 non-history endpoints minus lock-status, res-state, charge-mode and cockpit v1
-    expect(check.args).to.deep.equal([[7, 2]]);
+    // 11 non-hourly endpoints minus lock-status, res-state, charge-mode and cockpit v1; history and pressure hourly
+    expect(check.args).to.deep.equal([[7, 3]]);
   });
 
   it('holds only request variants the adapter knows', () => {
@@ -1849,4 +1850,54 @@ describe('answers without data', () => {
       expect(adapter.ignoreState.VIN1.location).to.equal(undefined);
     });
   }
+});
+
+describe('tyre pressure', () => {
+  const Json2iob = require('json2iob');
+  const { fixtureRoutes } = require('./test/fakeAdapter');
+  const pressure = (adapter) => urls(adapter).filter((url) => url.includes('/kca/car-adapter/v1/cars/VIN1/pressure?'));
+
+  it('reads the tyre pressure once per hour', async () => {
+    const now = useClock();
+    const adapter = setup();
+    await adapter.onReady();
+    now.tick(HOUR - 1);
+    await adapter.updateDevices();
+    expect(pressure(adapter)).to.have.length(1);
+    now.tick(1);
+    await adapter.updateDevices();
+    expect(pressure(adapter)).to.have.length(2);
+  });
+
+  it('writes the pressures in mbar with the pressure role', async () => {
+    useClock();
+    const adapter = setup(fixtureRoutes());
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    for (const key of ['flPressure', 'frPressure', 'rlPressure', 'rrPressure']) {
+      expect(adapter.objects.get('renault.0.VIN1.pressure.' + key)?.common, key).to.include({
+        type: 'number',
+        role: 'value.pressure',
+        unit: 'mbar',
+        write: false,
+      });
+    }
+    expect(adapter.objects.get('renault.0.VIN1.pressure')?.common.name).to.equal('Tyre pressure');
+  });
+
+  it('does not ask a model without tyre pressure', async () => {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('R5E1VE') });
+    await adapter.onReady();
+    expect(pressure(adapter)).to.deep.equal([]);
+  });
+
+  it('stops asking a car that rejects the tyre pressure', async () => {
+    const now = useClock();
+    const adapter = setup({ '/pressure?': httpError(404) });
+    await adapter.onReady();
+    now.tick(HOUR);
+    await adapter.updateDevices();
+    expect(pressure(adapter)).to.have.length(1);
+  });
 });

@@ -188,6 +188,7 @@ function fixtureRoutes() {
     '/lock-status?': fixture('lock-status.1.json'),
     '/res-state?': fixture('res-state.1.json'),
     '/location?': fixture('location.1.json'),
+    '/pressure?': fixture('pressure.json'),
     '/charge-history?': fixture('charge-history.day.json'),
     '/charges?': fixture('charges.json'),
   };

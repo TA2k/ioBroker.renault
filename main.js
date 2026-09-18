@@ -78,6 +78,10 @@ const DATA_UNITS = {
   chargeStartBatteryLevel: '%',
   chargeEndBatteryLevel: '%',
   chargeBatteryLevelRecovered: '%',
+  flPressure: 'mbar',
+  frPressure: 'mbar',
+  rlPressure: 'mbar',
+  rrPressure: 'mbar',
 };
 
 /** Roles of known vehicle data keys; everything else keeps the role json2iob derives from the type. */
@@ -90,6 +94,10 @@ const DATA_ROLES = {
   batteryTemperature: 'value.temperature',
   externalTemperature: 'value.temperature',
   internalTemperature: 'value.temperature',
+  flPressure: 'value.pressure',
+  frPressure: 'value.pressure',
+  rlPressure: 'value.pressure',
+  rrPressure: 'value.pressure',
 };
 
 const KCA = 'kca/car-adapter/v1/cars/';
@@ -904,6 +912,16 @@ class Renault extends utils.Adapter {
           '/kamereon/kca/car-adapter/v1/cars/$vin/location?country=' +
           this.country,
         desc: 'Location of the car',
+      },
+      {
+        path: 'pressure',
+        url:
+          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+          this.account.accountId +
+          '/kamereon/kca/car-adapter/v1/cars/$vin/pressure?country=' +
+          this.country,
+        desc: 'Tyre pressure',
+        hourly: true,
       },
     ];
 
