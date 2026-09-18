@@ -61,9 +61,47 @@ const DAY_MS = 24 * HOUR_MS;
 // Home Assistant limits its Renault integration to 60 requests per hour for the same reason.
 const QUOTA_PER_HOUR = 60;
 const DEFAULT_TEMPERATURE = 21;
-/** The car needs some time to upload its new state after a change at the wallbox. */
-const BATTERY_REFRESH_DELAY_MS = 60 * 1000;
-const BATTERY_REFRESH_GAP_MS = 3 * 60 * 1000;
+/** Least time between two single-endpoint reads of the same vehicle and endpoint. */
+const REFRESH_GAP_MS = 3 * 60 * 1000;
+/** Delay of a single-endpoint read that meets a running full poll. */
+const REFRESH_RETRY_MS = 30 * 1000;
+
+/**
+ * @typedef {object} RefreshButton
+ * @property {string} name state name
+ * @property {string} path endpoint the button reads
+ * @property {number} delayMs time from the press (or the accepted request) to the read
+ * @property {string} [action] table key of the request that asks the car to upload the data first
+ * @property {string} [type] body type of that request
+ */
+
+/**
+ * Buttons that read one endpoint of one vehicle. The ask… buttons first ask the car to upload its
+ * current data; the refresh… buttons only read what the cloud holds.
+ *
+ * @type {Record<string, RefreshButton>}
+ */
+const REFRESH_BUTTONS = {
+  // the car needs some time to upload its new state after a change at the wallbox
+  refreshBattery: { name: 'Read the battery status from the cloud, one minute later', path: 'battery-status', delayMs: 60 * 1000 },
+  // Known limit: renault-api does not list refresh-battery-status, so no model is known to lack it;
+  // a car that rejects it reports the error in lastCommandError.
+  askForBatteryRefresh: {
+    name: 'Ask the car for its battery status, read it 30 seconds later',
+    path: 'battery-status',
+    delayMs: 30 * 1000,
+    action: 'actions/refresh-battery-status',
+    type: 'RefreshBatteryStatus',
+  },
+  refreshLocation: { name: 'Read the location from the cloud', path: 'location', delayMs: 0 },
+  askForLocationRefresh: {
+    name: 'Ask the car for its location, read it 30 seconds later',
+    path: 'location',
+    delayMs: 30 * 1000,
+    action: 'actions/refresh-location',
+    type: 'RefreshLocation',
+  },
+};
 
 /** @typedef {{ path: string, url: string, desc: string, channel?: string, isHistory?: boolean, hourly?: boolean, replace?: boolean }} Endpoint */
 
@@ -236,6 +274,12 @@ const LEGACY_REMOTE_IDS = {
   lastError: 'lastCommandError',
 };
 
+/** Default names of test versions whose meaning changed; such a name is replaced, a user's name is kept. */
+const LEGACY_REMOTE_NAMES = {
+  refreshLocation: ['Ask the car for its current location'],
+  refreshBattery: ['Refresh only the battery status, one minute later'],
+};
+
 /**
  * Model name of a vehicle link. modelSCR and model.label often repeat each other ("ZOE", "ZOE"),
  * so a part that the other already contains is dropped.
@@ -329,12 +373,12 @@ class Renault extends utils.Adapter {
     this.budgetChecked = false;
     /** @type {Record<string, 'cockpit' | 'cockpitv2'>} */
     this.cockpitChoice = {};
-    /** @type {Record<string, ioBroker.Timeout | undefined>} vin -> pending battery refresh */
-    this.batteryRefreshTimeouts = {};
-    /** @type {Record<string, number>} vin -> time of the last battery refresh */
-    this.lastBatteryRefresh = {};
-    /** @type {Set<Promise<void>>} battery refreshes in flight; a full poll waits for them */
-    this.batteryRefreshes = new Set();
+    /** @type {Record<string, ioBroker.Timeout | undefined>} "vin path" -> pending single-endpoint read */
+    this.refreshTimeouts = {};
+    /** @type {Record<string, number>} "vin path" -> time of the last single-endpoint read */
+    this.lastRefresh = {};
+    /** @type {Set<Promise<void>>} single-endpoint reads in flight; a full poll waits for them */
+    this.refreshes = new Set();
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -490,35 +534,37 @@ class Renault extends utils.Adapter {
   }
 
   /**
-   * Ask battery-status of one vehicle one minute after the last call, and at most every three
-   * minutes. A script that follows the wallbox so costs one request instead of a full poll.
+   * Read one endpoint of one vehicle delayMs after the last call, and at most every three minutes.
+   * Presses before the read merge into it; a script that follows the wallbox so costs one request
+   * instead of a full poll.
    *
    * @param {string} vin
+   * @param {string} path endpoint path
+   * @param {number} delayMs
    */
-  scheduleBatteryRefresh(vin) {
-    this.batteryRefreshTimeouts[vin] && this.clearTimeout(this.batteryRefreshTimeouts[vin]);
-    const due = Math.max(Date.now() + BATTERY_REFRESH_DELAY_MS, (this.lastBatteryRefresh[vin] ?? -Infinity) + BATTERY_REFRESH_GAP_MS);
-    this.batteryRefreshTimeouts[vin] = this.setTimeout(async () => {
-      delete this.batteryRefreshTimeouts[vin];
-      // the running poll may have asked battery-status before the change, so ask again after it
+  scheduleRefresh(vin, path, delayMs) {
+    const key = vin + ' ' + path;
+    this.refreshTimeouts[key] && this.clearTimeout(this.refreshTimeouts[key]);
+    const due = Math.max(Date.now() + delayMs, (this.lastRefresh[key] ?? -Infinity) + REFRESH_GAP_MS);
+    this.refreshTimeouts[key] = this.setTimeout(async () => {
+      delete this.refreshTimeouts[key];
+      // the running poll may have read the endpoint before the car uploaded, so read again after it
       if (this.polling) {
-        this.scheduleBatteryRefresh(vin);
+        this.scheduleRefresh(vin, path, REFRESH_RETRY_MS);
         return;
       }
-      this.lastBatteryRefresh[vin] = Date.now();
-      const refresh = this.updateDevices(false, { vin, path: 'battery-status' }).catch((error) =>
-        this.log.error('Battery refresh failed: ' + error),
-      );
-      this.batteryRefreshes.add(refresh);
+      this.lastRefresh[key] = Date.now();
+      const refresh = this.updateDevices(false, { vin, path }).catch((error) => this.log.error('Reading ' + path + ' failed: ' + error));
+      this.refreshes.add(refresh);
       try {
         await refresh;
       } finally {
-        this.batteryRefreshes.delete(refresh);
+        this.refreshes.delete(refresh);
       }
     }, due - Date.now());
   }
 
-  /** Run one poll cycle unless one is already running; a running battery refresh is awaited first. */
+  /** Run one poll cycle unless one is already running; a running single-endpoint read is awaited first. */
   async pollNow() {
     if (this.polling) {
       this.log.debug('Poll skipped, the previous poll is still running');
@@ -526,7 +572,7 @@ class Renault extends utils.Adapter {
     }
     this.polling = true;
     try {
-      await Promise.all(this.batteryRefreshes);
+      await Promise.all(this.refreshes);
       await this.updateDevices();
     } finally {
       this.polling = false;
@@ -789,26 +835,15 @@ class Renault extends utils.Adapter {
           } else {
             remoteObjects.push({ id: 'chargeMode', name: 'Charge mode', type: 'string', role: 'text', states: CHARGE_MODES });
           }
-          if (this.endpointMode(device.vin, 'actions/refresh-location') === null) {
-            unsupported.push('refreshLocation');
-          } else {
-            remoteObjects.push({
-              id: 'refreshLocation',
-              name: 'Ask the car for its current location',
-              type: 'boolean',
-              role: 'button',
-              read: false,
-            });
+          for (const [id, button] of Object.entries(REFRESH_BUTTONS)) {
+            if (this.refreshSupported(device.vin, button)) {
+              remoteObjects.push({ id, name: button.name, type: 'boolean', role: 'button', read: false });
+            } else {
+              unsupported.push(id);
+            }
           }
           remoteObjects.push(
             { id: 'refreshAll', name: 'Refresh all vehicle data', type: 'boolean', role: 'button', read: false },
-            {
-              id: 'refreshBattery',
-              name: 'Refresh only the battery status, one minute later',
-              type: 'boolean',
-              role: 'button',
-              read: false,
-            },
             {
               id: 'lastCommandError',
               name: 'Error of the last command, empty after a success',
@@ -857,9 +892,11 @@ class Renault extends utils.Adapter {
               });
               continue;
             }
-            // Installations of older versions get the new roles; a name the user gave stays.
+            // Installations of older versions get the new roles; a name the user gave stays, an
+            // outdated default name is replaced.
+            const renamed = LEGACY_REMOTE_NAMES[remote.id]?.includes(stored.common.name);
             const changed = Object.entries(common).filter(
-              ([key, value]) => key !== 'name' && JSON.stringify(stored.common[key]) !== JSON.stringify(value),
+              ([key, value]) => (key !== 'name' || renamed) && JSON.stringify(stored.common[key]) !== JSON.stringify(value),
             );
             if (changed.length) {
               await this.extendObjectAsync(objectId, { common: Object.fromEntries(changed) });
@@ -1565,7 +1602,7 @@ class Renault extends utils.Adapter {
       this.setState('info.connection', false, true);
       this.pollTimeout && this.clearTimeout(this.pollTimeout);
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
-      Object.values(this.batteryRefreshTimeouts).forEach((timer) => timer && this.clearTimeout(timer));
+      Object.values(this.refreshTimeouts).forEach((timer) => timer && this.clearTimeout(timer));
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       this.vehicleListInterval && this.clearInterval(this.vehicleListInterval);
       callback();
@@ -1620,24 +1657,16 @@ class Renault extends utils.Adapter {
       await this.setChargeMode(id, vin, state.val);
       return;
     }
-    if (path === 'refreshLocation') {
+    if (Object.hasOwn(REFRESH_BUTTONS, path)) {
       try {
         if (state.val === true) {
-          await this.refreshLocation(vin);
+          await this.pressRefresh(vin, path, REFRESH_BUTTONS[path]);
         } else if (state.val !== false) {
           await this.reportCommandError(vin, path + ' is a button and takes true, got ' + JSON.stringify(state.val) + '. Nothing sent');
         }
       } finally {
         await this.setState(id, false, true);
       }
-      return;
-    }
-    if (path === 'refreshBattery') {
-      if (state.val === true) {
-        this.log.debug('Battery refresh of ' + vin + ' requested');
-        this.scheduleBatteryRefresh(vin);
-      }
-      await this.setState(id, false, true);
       return;
     }
     if (path === 'refreshAll') {
@@ -1739,18 +1768,37 @@ class Renault extends utils.Adapter {
   }
 
   /**
-   * The car uploads its position; the poll 20 seconds after the command fetches it.
+   * Whether the model offers the endpoint of the button and, for an ask… button, the request that
+   * asks the car.
    *
    * @param {string} vin
+   * @param {RefreshButton} button
    */
-  async refreshLocation(vin) {
-    if (this.endpointMode(vin, 'actions/refresh-location') === null) {
-      await this.reportCommandError(vin, 'refreshLocation is not supported on this model. Nothing sent');
+  refreshSupported(vin, button) {
+    return this.endpointMode(vin, button.path) !== null && (!button.action || this.endpointMode(vin, button.action) !== null);
+  }
+
+  /**
+   * Read one endpoint later; an ask… button first asks the car to upload it and reads only when the
+   * cloud accepted that request.
+   *
+   * @param {string} vin
+   * @param {string} name state id of the button
+   * @param {RefreshButton} button
+   */
+  async pressRefresh(vin, name, button) {
+    if (!this.refreshSupported(vin, button)) {
+      await this.reportCommandError(vin, name + ' is not supported on this model. Nothing sent');
       return;
     }
-    await this.sendCommand(vin, 'refreshLocation', this.kamereonUrl(KCA, vin, 'actions/refresh-location'), {
-      data: { type: 'RefreshLocation' },
-    });
+    if (button.action) {
+      const url = this.kamereonUrl(KCA, vin, button.action);
+      if (!(await this.sendCommand(vin, name, url, { data: { type: button.type } }, false))) {
+        return;
+      }
+    }
+    this.log.debug(name + ' of ' + vin + ': reading ' + button.path + ' in ' + button.delayMs / 1000 + ' s');
+    this.scheduleRefresh(vin, button.path, button.delayMs);
   }
 
   /**
@@ -1858,9 +1906,10 @@ class Renault extends utils.Adapter {
    * @param {string} name command name for log and lastCommandError
    * @param {string} url
    * @param {unknown} data request body
+   * @param {boolean} [pollAfter] false when the caller reads the result itself
    * @returns {Promise<boolean>} true when the cloud accepted the command
    */
-  async sendCommand(vin, name, url, data) {
+  async sendCommand(vin, name, url, data, pollAfter = true) {
     this.log.debug(name + ' for ' + vin + ': ' + JSON.stringify(data));
     let accepted = false;
     try {
@@ -1876,7 +1925,9 @@ class Renault extends utils.Adapter {
       error.response && this.log.debug(JSON.stringify(error.response.data));
       await this.setState(vin + '.remote.lastCommandError', message, true);
     }
-    this.schedulePoll(20 * 1000);
+    if (pollAfter) {
+      this.schedulePoll(20 * 1000);
+    }
     return accepted;
   }
 

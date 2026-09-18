@@ -218,7 +218,7 @@ describe('battery refresh', () => {
   const kamereon = (adapter) => urls(adapter).filter((url) => url.includes('/kamereon/'));
   const press = (adapter, vin = 'VIN1') => adapter.onStateChange('renault.0.' + vin + '.remote.refreshBattery', userWrite(true));
   /** The pending battery refresh timer of the vehicle */
-  const pending = (adapter, vin = 'VIN1') => adapter.batteryRefreshTimeouts[vin];
+  const pending = (adapter, vin = 'VIN1') => adapter.refreshTimeouts[vin + ' battery-status'];
 
   async function started(routes) {
     const adapter = setup(routes);
@@ -293,7 +293,7 @@ describe('battery refresh', () => {
     await first.fn();
     expect(kamereon(adapter)).to.deep.equal([]);
     expect(pending(adapter)).to.not.equal(first);
-    expect(pending(adapter).ms).to.equal(MINUTE);
+    expect(pending(adapter).ms).to.equal(30 * 1000);
     adapter.polling = false;
     await pending(adapter).fn();
     expect(kamereon(adapter)).to.have.length(1);
@@ -318,7 +318,7 @@ describe('battery refresh', () => {
     expect(kamereon(adapter).length).to.be.greaterThan(2);
     expect(logged(adapter.log.debug).some((line) => line.includes('Poll skipped'))).to.equal(false);
     expect(adapter.polling).to.equal(false);
-    expect(adapter.batteryRefreshes.size).to.equal(0);
+    expect(adapter.refreshes.size).to.equal(0);
   });
 
   it('lets a full poll run after a failed battery refresh', async () => {
@@ -329,7 +329,7 @@ describe('battery refresh', () => {
     const refresh = pending(adapter).fn();
     await Promise.all([refresh, adapter.pollNow()]);
     expect(kamereon(adapter).length).to.be.greaterThan(2);
-    expect(adapter.batteryRefreshes.size).to.equal(0);
+    expect(adapter.refreshes.size).to.equal(0);
   });
 
   it('refreshes the token once and asks battery-status again after a 401', async () => {
@@ -358,7 +358,7 @@ describe('battery refresh', () => {
     await adapter.onStateChange('renault.0.VIN1.remote.refreshBattery', userWrite(false));
     await adapter.onStateChange('renault.0.VIN1.remote.refreshBattery', userWrite('true'));
     await press(adapter, 'OTHER');
-    expect(adapter.batteryRefreshTimeouts).to.deep.equal({});
+    expect(adapter.refreshTimeouts).to.deep.equal({});
   });
 
   it('clears a pending battery refresh on unload', async () => {
@@ -1640,6 +1640,8 @@ describe('remote objects', () => {
     await adapter.onReady();
     expect(deletedRemote(adapter)).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
     expect(remoteIds(adapter)).to.deep.equal([
+      'askForBatteryRefresh',
+      'askForLocationRefresh',
       'chargeLimitMin',
       'chargeLimitTarget',
       'chargeMode',
@@ -1669,23 +1671,27 @@ describe('remote objects', () => {
       return remoteIds(adapter);
     };
     const sorted = (...list) => list.sort();
-    const always = ['lastCommandError', 'refreshAll', 'refreshBattery'];
+    const always = ['lastCommandError', 'refreshAll'];
+    const location = ['refreshLocation', 'askForLocationRefresh'];
+    const battery = ['refreshBattery', 'askForBatteryRefresh'];
     const commands = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature'];
     // renault-api does not list charge-set-mode for the Zoe phase 2 and the XJA1VP, nor
-    // refresh-location for any of these, so they get the default
-    expect(await ids('X102VE')).to.deep.equal(sorted('chargeMode', 'refreshLocation', ...commands, ...always));
+    // refresh-location or refresh-battery-status for any of these, so they get the default
+    expect(await ids('X102VE')).to.deep.equal(sorted('chargeMode', ...location, ...battery, ...commands, ...always));
     expect(await ids('R5E1VE')).to.deep.equal(
       sorted(
         'chargeLimitMin',
         'chargeLimitTarget',
         'hornStart',
         'lightsStart',
-        'refreshLocation',
+        ...location,
+        ...battery,
         ...commands.filter((id) => id !== 'chargingStop'),
         ...always,
       ),
     );
-    expect(await ids('XJA1VP')).to.deep.equal(sorted('chargeMode', 'refreshLocation', ...always));
+    // the XJA1VP has no battery-status, so it gets no battery button either
+    expect(await ids('XJA1VP')).to.deep.equal(sorted('chargeMode', ...location, ...always));
   });
 
   it('removes command states the model does not support', async () => {
@@ -2361,7 +2367,8 @@ describe('horn, lights and location', () => {
   const cases = [
     ['hornStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'horn' } }],
     ['lightsStart', HORN_LIGHTS, { type: 'HornLights', attributes: { action: 'start', target: 'lights' } }],
-    ['refreshLocation', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-location?', { type: 'RefreshLocation' }],
+    ['askForLocationRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-location?', { type: 'RefreshLocation' }],
+    ['askForBatteryRefresh', '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/refresh-battery-status?', { type: 'RefreshBatteryStatus' }],
   ];
   /** @param {string} [code] model code of VIN1 */
   async function ready(code = undefined) {
@@ -2414,7 +2421,9 @@ describe('horn, lights and location', () => {
     const common = (id) => adapter.objects.get('renault.0.VIN1.remote.' + id)?.common;
     expect(common('hornStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
     expect(common('lightsStart')).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
-    expect(common('refreshLocation')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
+    for (const id of ['refreshLocation', 'askForLocationRefresh', 'refreshBattery', 'askForBatteryRefresh']) {
+      expect(common(id)).to.include({ type: 'boolean', role: 'button', read: false, write: true });
+    }
     expect(common('hornStop')).to.equal(undefined);
     expect(common('lightsStop')).to.equal(undefined);
   });
@@ -2427,6 +2436,137 @@ describe('horn, lights and location', () => {
       await write(adapter, path, true);
     }
     expect(posts(adapter)).to.deep.equal([]);
+  });
+});
+
+describe('refresh buttons', () => {
+  const SECOND = 1000;
+  const MINUTE = 60 * SECOND;
+  const LOCATION = '/cars/VIN1/location?';
+  const BATTERY = '/cars/VIN1/battery-status?';
+  const kamereon = (adapter) => urls(adapter).filter((url) => url.includes('/kamereon/'));
+  const posts = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .filter((request) => request.method === 'post');
+  /** @type {(adapter: any, path: string, val?: unknown) => Promise<void>} */
+  const press = (adapter, path, val = true) => adapter.onStateChange('renault.0.VIN1.remote.' + path, userWrite(val));
+  const pending = (adapter, path) => adapter.refreshTimeouts['VIN1 ' + path];
+
+  /** @param {Record<string, unknown>} [routes] */
+  async function started(routes = {}) {
+    useClock();
+    const adapter = setup(routes);
+    await adapter.onReady();
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+
+  it('refreshLocation reads only the location from the cloud, without asking the car', async () => {
+    const adapter = await started();
+    const poll = adapter.pollTimeout;
+    await press(adapter, 'refreshLocation');
+    expect(posts(adapter)).to.deep.equal([]);
+    expect(pending(adapter, 'location').ms).to.equal(0);
+    await pending(adapter, 'location').fn();
+    expect(kamereon(adapter)).to.have.length(1);
+    expect(kamereon(adapter)[0]).to.include(LOCATION);
+    expect(adapter.pollTimeout).to.equal(poll);
+  });
+
+  for (const [path, action, endpoint, read] of [
+    ['askForLocationRefresh', '/actions/refresh-location?', LOCATION, 'location'],
+    ['askForBatteryRefresh', '/actions/refresh-battery-status?', BATTERY, 'battery-status'],
+  ]) {
+    it(`${path} asks the car, then reads only ${read} 30 seconds later`, async () => {
+      const adapter = await started();
+      const poll = adapter.pollTimeout;
+      await press(adapter, path);
+      expect(posts(adapter)).to.have.length(1);
+      expect(posts(adapter)[0].url).to.include(action);
+      // no full poll after the command, only the single read
+      expect(adapter.pollTimeout).to.equal(poll);
+      expect(pending(adapter, read).ms).to.equal(30 * SECOND);
+      adapter.requestClient.resetHistory();
+      await pending(adapter, read).fn();
+      expect(kamereon(adapter)).to.have.length(1);
+      expect(kamereon(adapter)[0]).to.include(endpoint);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.equal('');
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(false);
+      expect(adapter.acks['VIN1.remote.' + path]).to.equal(true);
+    });
+
+    it(`${path} reads nothing when the car refuses the request`, async () => {
+      const adapter = await started({ [action]: httpError(403, {}, { errors: [{ errorCode: 'err.func.wired.forbidden' }] }) });
+      await press(adapter, path);
+      expect(adapter.refreshTimeouts).to.deep.equal({});
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include(path).and.include('err.func.wired.forbidden');
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(false);
+    });
+
+    for (const val of [1, 'true', null]) {
+      it(`${path} sends nothing for ${JSON.stringify(val)}`, async () => {
+        const adapter = await started();
+        await press(adapter, path, val);
+        expect(posts(adapter)).to.deep.equal([]);
+        expect(adapter.refreshTimeouts).to.deep.equal({});
+        expect(adapter.states['VIN1.remote.lastCommandError']).to.include(path);
+      });
+    }
+  }
+
+  it('keeps three minutes between two reads of the location, asked or not', async () => {
+    const adapter = await started();
+    await press(adapter, 'refreshLocation');
+    await pending(adapter, 'location').fn();
+    clock?.tick(MINUTE);
+    await press(adapter, 'askForLocationRefresh');
+    expect(pending(adapter, 'location').ms).to.equal(2 * MINUTE);
+  });
+
+  it('keeps the battery and the location read apart', async () => {
+    const adapter = await started();
+    await press(adapter, 'refreshBattery');
+    await press(adapter, 'refreshLocation');
+    expect(pending(adapter, 'battery-status').ms).to.equal(MINUTE);
+    expect(pending(adapter, 'location').ms).to.equal(0);
+  });
+
+  it('reads the location again 30 seconds after a full poll that runs when it is due', async () => {
+    const adapter = await started();
+    await press(adapter, 'refreshLocation');
+    adapter.polling = true;
+    await pending(adapter, 'location').fn();
+    expect(kamereon(adapter)).to.deep.equal([]);
+    expect(pending(adapter, 'location').ms).to.equal(30 * SECOND);
+  });
+
+  it('creates no battery buttons on a model without battery status', async () => {
+    const adapter = setup({ '/vehicles?': vehicleOf('XJA1VP') });
+    await adapter.onReady();
+    expect(adapter.objects.has('renault.0.VIN1.remote.refreshBattery')).to.equal(false);
+    expect(adapter.objects.has('renault.0.VIN1.remote.askForBatteryRefresh')).to.equal(false);
+    adapter.requestClient.resetHistory();
+    await press(adapter, 'askForBatteryRefresh');
+    expect(posts(adapter)).to.deep.equal([]);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('not supported');
+  });
+
+  it('replaces the default name of a test version and keeps a name the user gave', async () => {
+    const adapter = setup();
+    const legacy = (id, name) =>
+      adapter.objects.set('renault.0.VIN1.remote.' + id, {
+        _id: 'renault.0.VIN1.remote.' + id,
+        type: 'state',
+        common: { name, type: 'boolean', role: 'button', read: false, write: true },
+        native: {},
+      });
+    legacy('refreshLocation', 'Ask the car for its current location');
+    legacy('refreshBattery', 'Wallbox-Abfrage');
+    await adapter.onReady();
+    expect(adapter.objects.get('renault.0.VIN1.remote.refreshLocation')?.common.name).to.equal('Read the location from the cloud');
+    expect(adapter.objects.get('renault.0.VIN1.remote.refreshBattery')?.common.name).to.equal('Wallbox-Abfrage');
   });
 });
 

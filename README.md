@@ -87,22 +87,24 @@ the table gets every request; what the car rejects is asked again once a day. Yo
 
 Each vehicle is created as a device using its VIN. Remote commands are exposed as states under `renault.0.<VIN>.remote.*`:
 
-| State                | Type    | Role                | Action                                                                                      |
-| -------------------- | ------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| `climateStart`       | boolean | `button.start`      | start the climate control                                                                   |
-| `climateStop`        | boolean | `button.stop`       | stop the climate control                                                                    |
-| `climateTemperature` | number  | `level.temperature` | target temperature in °C for the next start (default 21)                                    |
-| `chargingStart`      | boolean | `button.start`      | start charging (see below)                                                                  |
-| `chargingStop`       | boolean | `button.stop`       | stop charging                                                                               |
-| `chargeLimitMin`     | number  | `level`             | minimum charge level in %, 15 to 45 in steps of 5                                           |
-| `chargeLimitTarget`  | number  | `level`             | target charge level in %, 55 to 100 in steps of 5                                           |
-| `chargeMode`         | string  | `text`              | `always`, `always_charging`, `schedule_mode` or `scheduled`; shows the mode the car reports |
-| `hornStart`          | boolean | `button.start`      | sound the horn                                                                              |
-| `lightsStart`        | boolean | `button.start`      | flash the lights                                                                            |
-| `refreshLocation`    | boolean | `button`            | ask the car for its position; `location` updates with the poll 20 s later                   |
-| `refreshAll`         | boolean | `button`            | poll all vehicle data now                                                                   |
-| `refreshBattery`     | boolean | `button`            | ask only the battery status, one minute later                                               |
-| `lastCommandError`   | string  | `text`              | error of the last command, empty after a successful command                                 |
+| State                   | Type    | Role                | Action                                                                                      |
+| ----------------------- | ------- | ------------------- | ------------------------------------------------------------------------------------------- |
+| `climateStart`          | boolean | `button.start`      | start the climate control                                                                   |
+| `climateStop`           | boolean | `button.stop`       | stop the climate control                                                                    |
+| `climateTemperature`    | number  | `level.temperature` | target temperature in °C for the next start (default 21)                                    |
+| `chargingStart`         | boolean | `button.start`      | start charging (see below)                                                                  |
+| `chargingStop`          | boolean | `button.stop`       | stop charging                                                                               |
+| `chargeLimitMin`        | number  | `level`             | minimum charge level in %, 15 to 45 in steps of 5                                           |
+| `chargeLimitTarget`     | number  | `level`             | target charge level in %, 55 to 100 in steps of 5                                           |
+| `chargeMode`            | string  | `text`              | `always`, `always_charging`, `schedule_mode` or `scheduled`; shows the mode the car reports |
+| `hornStart`             | boolean | `button.start`      | sound the horn                                                                              |
+| `lightsStart`           | boolean | `button.start`      | flash the lights                                                                            |
+| `refreshLocation`       | boolean | `button`            | read the location from the cloud now                                                        |
+| `askForLocationRefresh` | boolean | `button`            | ask the car to upload its position, read the location 30 s later                            |
+| `refreshAll`            | boolean | `button`            | poll all vehicle data now                                                                   |
+| `refreshBattery`        | boolean | `button`            | read the battery status from the cloud, one minute later                                    |
+| `askForBatteryRefresh`  | boolean | `button`            | ask the car to upload its battery status, read it 30 s later                                |
+| `lastCommandError`      | string  | `text`              | error of the last command, empty after a successful command                                 |
 
 A button is pressed by writing `true`. The adapter resets it to `false` with `ack: true` once the
 command was handled; `lastCommandError` tells whether the Renault cloud accepted it. The car carries
@@ -113,10 +115,17 @@ it out afterwards, and the data states show the result after the next poll, for 
 from `soc-levels`. It is read once per hour; right after the start a write waits for that first
 read. Both states show the limits the car reports, also after a change in the app.
 
-`refreshBattery` is meant for scripts that follow the wallbox: it costs one request instead of a
-full poll. It waits one minute, so the car has time to upload its new state, merges all presses in
-that minute, and asks the battery status of a vehicle at most every three minutes. Frequent use of
-`refreshAll` can exhaust the request quota of the account, which also blocks the My Renault app.
+The `refresh…` buttons read only what the cloud holds; the car uploads by itself, for example after
+a change at the wallbox. The `askFor…` buttons first ask the car to upload its current data, which
+wakes its telematics unit; they read only when the cloud accepted that request, and the result is
+in `lastCommandError`. `askForBatteryRefresh` is not documented by renault-api, so whether a model
+supports it shows only when it is pressed. Do not press the `askFor…` buttons from a script in a
+tight loop, every press wakes the car and draws on its 12 V battery. Each button costs one read
+instead of a full poll, and the same data of a vehicle is read at most every three minutes.
+
+`refreshBattery` is meant for scripts that follow the wallbox. It waits one minute, so the car has
+time to upload its new state, and merges all presses in that minute. Frequent use of `refreshAll`
+can exhaust the request quota of the account, which also blocks the My Renault app.
 
 Which request a command sends, and which vehicle data the adapter polls, depends on the model. The
 adapter uses the endpoint table of [renault-api](https://github.com/hacf-fr/renault-api) (model code
@@ -184,7 +193,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) `chargingStart` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs, as the app does
 - (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it; the current limits are in the new channel `soc-levels`
 - (typhosj) set the charge mode with `remote.chargeMode`; it and the charge limit states show the values the car reports
-- (typhosj) new buttons `remote.hornStart`, `remote.lightsStart` and `remote.refreshLocation` on models that support them, and `remote.refreshBattery`, which asks only the battery status for scripts that follow the wallbox and never delays the regular poll
+- (typhosj) new buttons `remote.hornStart` and `remote.lightsStart` on models that support them; `remote.refreshLocation` and `remote.refreshBattery` read only the location or the battery status from the cloud (`refreshBattery` for scripts that follow the wallbox), and `remote.askForLocationRefresh` and `remote.askForBatteryRefresh` first ask the car to upload it and read it 30 seconds later
 - (typhosj) new channels `pressure` (tyre pressure in mbar) and `alerts` (Renault 5), read once per hour; a cleared alert is removed, the other alert states keep their history settings
 - (typhosj) the vehicle is named after its model without doubling it (`ZOE` instead of `ZOEZOE`); a name given by the user is kept
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
