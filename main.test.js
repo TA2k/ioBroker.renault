@@ -924,8 +924,8 @@ describe('request budget', () => {
     const check = sinon.spy(adapter, 'checkRequestBudget');
     await adapter.onReady();
     await adapter.updateDevices();
-    // 11 non-hourly endpoints minus the ignored lock-status and minus cockpit v1, plus the hourly history and pressure
-    expect(check.args).to.deep.equal([[9, 3]]);
+    // 11 non-hourly endpoints minus the ignored lock-status and minus cockpit v1, plus the hourly history, pressure and charge limits
+    expect(check.args).to.deep.equal([[9, 4]]);
     expect(budget(adapter)).to.have.length(1);
   });
 
@@ -1484,6 +1484,8 @@ describe('remote objects', () => {
     await adapter.onReady();
     expect(deletedRemote(adapter)).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
     expect(remoteIds(adapter)).to.deep.equal([
+      'chargeLimitMin',
+      'chargeLimitTarget',
       'chargingStart',
       'chargingStop',
       'climateStart',
@@ -1509,7 +1511,7 @@ describe('remote objects', () => {
     const always = ['lastCommandError', 'refreshAll', 'refreshBattery'];
     const all = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature', ...always];
     expect(await ids('X102VE')).to.deep.equal(all);
-    expect(await ids('R5E1VE')).to.deep.equal(all.filter((id) => id !== 'chargingStop'));
+    expect(await ids('R5E1VE')).to.deep.equal(['chargeLimitMin', 'chargeLimitTarget', ...all.filter((id) => id !== 'chargingStop')]);
     expect(await ids('XJA1VP')).to.deep.equal(always);
   });
 
@@ -1899,5 +1901,139 @@ describe('tyre pressure', () => {
     now.tick(HOUR);
     await adapter.updateDevices();
     expect(pressure(adapter)).to.have.length(1);
+  });
+});
+
+describe('charge limits', () => {
+  const SOC = '/kamereon/kcm/v1/vehicles/VIN1/ev/soc-levels?country=de';
+  const LEVELS = { socMin: 20, socTarget: 80 };
+  async function ready(routes = {}) {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('R5E1VE'), '/ev/soc-levels': LEVELS, ...routes });
+    await adapter.onReady();
+    adapter.states['VIN1.soc-levels.socMin'] = 20;
+    adapter.states['VIN1.soc-levels.socTarget'] = 80;
+    adapter.requestClient.resetHistory();
+    return adapter;
+  }
+  const posts = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .map((call) => call.args[0])
+      .filter((request) => request.method === 'post');
+  const write = async (adapter, path, val) => {
+    const id = 'renault.0.VIN1.remote.' + path;
+    await adapter.setState(id, val, false);
+    await adapter.onStateChange(id, userWrite(val));
+  };
+
+  it('reads the charge limits once per hour', async () => {
+    const now = useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('R5E1VE'), '/ev/soc-levels': LEVELS });
+    await adapter.onReady();
+    expect(adapter.json2iob.parse.calledWith('VIN1.soc-levels', LEVELS)).to.equal(true);
+    now.tick(HOUR - 1);
+    await adapter.updateDevices();
+    expect(urls(adapter).filter((url) => url.includes(SOC))).to.have.length(1);
+  });
+
+  it('does not ask or create the charge limits on a model without them', async () => {
+    useClock();
+    const adapter = setup({ '/vehicles?': vehicleOf('X102VE') });
+    adapter.objects.set('renault.0.VIN1.remote.chargeLimitMin', { common: {} });
+    await adapter.onReady();
+    expect(urls(adapter).filter((url) => url.includes('/ev/soc-levels'))).to.deep.equal([]);
+    expect(adapter.objects.has('renault.0.VIN1.remote.chargeLimitMin')).to.equal(false);
+    expect(adapter.objects.has('renault.0.VIN1.remote.chargeLimitTarget')).to.equal(false);
+  });
+
+  it('sends the new target with the known minimum and confirms it', async () => {
+    const adapter = await ready();
+    await write(adapter, 'chargeLimitTarget', 90);
+    expect(posts(adapter)).to.have.length(1);
+    expect(posts(adapter)[0].url).to.include(SOC);
+    expect(posts(adapter)[0].data).to.deep.equal({ socMin: 20, socTarget: 90 });
+    expect(adapter.acks['VIN1.remote.chargeLimitTarget']).to.equal(true);
+    expect(adapter.states['VIN1.soc-levels.socTarget']).to.equal(90);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.equal('');
+  });
+
+  it('sends the new minimum with the known target', async () => {
+    const adapter = await ready();
+    await write(adapter, 'chargeLimitMin', 30);
+    expect(posts(adapter)[0].data).to.deep.equal({ socMin: 30, socTarget: 80 });
+    expect(adapter.states['VIN1.soc-levels.socMin']).to.equal(30);
+  });
+
+  for (const [path, val] of [
+    ['chargeLimitMin', 15],
+    ['chargeLimitMin', 45],
+    ['chargeLimitTarget', 55],
+    ['chargeLimitTarget', 100],
+  ]) {
+    it(`accepts ${path} = ${val}`, async () => {
+      const adapter = await ready();
+      await write(adapter, path, val);
+      expect(posts(adapter)).to.have.length(1);
+    });
+  }
+
+  for (const [path, val] of [
+    ['chargeLimitMin', 10],
+    ['chargeLimitMin', 50],
+    ['chargeLimitMin', 17],
+    ['chargeLimitMin', 15.5],
+    ['chargeLimitMin', '20'],
+    ['chargeLimitMin', NaN],
+    ['chargeLimitMin', Infinity],
+    ['chargeLimitMin', null],
+    ['chargeLimitMin', true],
+    ['chargeLimitTarget', 50],
+    ['chargeLimitTarget', 105],
+    ['chargeLimitTarget', 99],
+  ]) {
+    it(`rejects ${path} = ${String(val)}`, async () => {
+      const adapter = await ready();
+      await write(adapter, path, val);
+      expect(posts(adapter)).to.deep.equal([]);
+      expect(adapter.acks['VIN1.remote.' + path]).to.equal(false);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include(path);
+    });
+  }
+
+  for (const other of [undefined, null, '20', 12]) {
+    it(`sends nothing while the other limit is ${String(other)}`, async () => {
+      const adapter = await ready();
+      adapter.states['VIN1.soc-levels.socMin'] = other;
+      if (other === undefined) {
+        delete adapter.states['VIN1.soc-levels.socMin'];
+      }
+      await write(adapter, 'chargeLimitTarget', 90);
+      expect(posts(adapter)).to.deep.equal([]);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('not known');
+    });
+  }
+
+  it('keeps the read value when the cloud refuses the change', async () => {
+    const adapter = await ready({ '/ev/soc-levels': (request) => (request.method === 'post' ? httpError(403) : LEVELS) });
+    await write(adapter, 'chargeLimitTarget', 90);
+    expect(adapter.acks['VIN1.remote.chargeLimitTarget']).to.equal(false);
+    expect(adapter.states['VIN1.soc-levels.socTarget']).to.equal(80);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('chargeLimitTarget');
+  });
+
+  it('creates the limit states with range, step and unit', async () => {
+    const adapter = await ready();
+    expect(adapter.objects.get('renault.0.VIN1.remote.chargeLimitMin')?.common).to.include({
+      type: 'number',
+      role: 'level',
+      unit: '%',
+      min: 15,
+      max: 45,
+      step: 5,
+      read: true,
+      write: true,
+    });
+    expect(adapter.objects.get('renault.0.VIN1.remote.chargeLimitTarget')?.common).to.include({ min: 55, max: 100, step: 5 });
   });
 });

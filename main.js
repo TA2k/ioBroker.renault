@@ -78,6 +78,8 @@ const DATA_UNITS = {
   chargeStartBatteryLevel: '%',
   chargeEndBatteryLevel: '%',
   chargeBatteryLevelRecovered: '%',
+  socMin: '%',
+  socTarget: '%',
   flPressure: 'mbar',
   frPressure: 'mbar',
   rlPressure: 'mbar',
@@ -99,6 +101,22 @@ const DATA_ROLES = {
   rlPressure: 'value.pressure',
   rrPressure: 'value.pressure',
 };
+
+/** Charge limit states and the soc-levels keys they set; ranges as in Home Assistant's Renault number entities. */
+const CHARGE_LIMITS = {
+  chargeLimitMin: { key: 'socMin', other: 'socTarget', min: 15, max: 45 },
+  chargeLimitTarget: { key: 'socTarget', other: 'socMin', min: 55, max: 100 },
+};
+const CHARGE_LIMIT_STEP = 5;
+
+/**
+ * @param {unknown} value
+ * @param {{ min: number, max: number }} limit
+ * @returns {value is number}
+ */
+function isValidChargeLimit(value, limit) {
+  return Number.isInteger(value) && Number(value) >= limit.min && Number(value) <= limit.max && Number(value) % CHARGE_LIMIT_STEP === 0;
+}
 
 const KCA = 'kca/car-adapter/v1/cars/';
 const KCM = 'kcm/v1/vehicles/';
@@ -694,6 +712,23 @@ class Renault extends utils.Adapter {
           } else {
             unsupported.push('climateTemperature');
           }
+          for (const [id, limit] of Object.entries(CHARGE_LIMITS)) {
+            if (this.endpointMode(device.vin, 'soc-levels') === null) {
+              unsupported.push(id);
+              continue;
+            }
+            remoteObjects.push({
+              id,
+              name:
+                (id === 'chargeLimitMin' ? 'Minimum' : 'Target') + ' charge level in % (' + limit.min + ' to ' + limit.max + ', step 5)',
+              type: 'number',
+              role: 'level',
+              unit: '%',
+              min: limit.min,
+              max: limit.max,
+              step: CHARGE_LIMIT_STEP,
+            });
+          }
           remoteObjects.push(
             { id: 'refreshAll', name: 'Refresh all vehicle data', type: 'boolean', role: 'button', read: false },
             {
@@ -740,6 +775,7 @@ class Renault extends utils.Adapter {
                 write: remote.write ?? true,
                 ...(remote.unit ? { unit: remote.unit } : {}),
                 ...(remote.def !== undefined ? { def: remote.def } : {}),
+                ...(remote.min !== undefined ? { min: remote.min, max: remote.max, step: remote.step } : {}),
               },
               native: {},
             });
@@ -921,6 +957,16 @@ class Renault extends utils.Adapter {
           '/kamereon/kca/car-adapter/v1/cars/$vin/pressure?country=' +
           this.country,
         desc: 'Tyre pressure',
+        hourly: true,
+      },
+      {
+        path: 'soc-levels',
+        url:
+          'https://api-wired-prod-1-euw1.wrd-aws.com/commerce/v1/accounts/' +
+          this.account.accountId +
+          '/kamereon/kcm/v1/vehicles/$vin/ev/soc-levels?country=' +
+          this.country,
+        desc: 'Charge limits',
         hourly: true,
       },
     ];
@@ -1393,6 +1439,10 @@ class Renault extends utils.Adapter {
       this.log.error('No account found');
       return;
     }
+    if (Object.hasOwn(CHARGE_LIMITS, path)) {
+      await this.setChargeLimit(id, vin, /** @type {keyof typeof CHARGE_LIMITS} */ (path), state.val);
+      return;
+    }
     if (path === 'refreshBattery') {
       if (state.val === true) {
         this.log.debug('Battery refresh of ' + vin + ' requested');
@@ -1497,6 +1547,48 @@ class Renault extends utils.Adapter {
     }
     const body = { ...settings, programs: settings.programs.map((program) => ({ ...program, programActivationStatus: false })) };
     await this.sendCommand(vin, name, url, body);
+  }
+
+  /**
+   * The endpoint takes both limits, so the other one comes from the last hourly read.
+   *
+   * @param {string} id
+   * @param {string} vin
+   * @param {keyof typeof CHARGE_LIMITS} path
+   * @param {unknown} value
+   */
+  async setChargeLimit(id, vin, path, value) {
+    const limit = CHARGE_LIMITS[path];
+    if (!isValidChargeLimit(value, limit)) {
+      await this.reportCommandError(
+        vin,
+        path +
+          ' must be a multiple of ' +
+          CHARGE_LIMIT_STEP +
+          ' from ' +
+          limit.min +
+          ' to ' +
+          limit.max +
+          ', got ' +
+          JSON.stringify(value) +
+          '. Nothing sent',
+      );
+      return;
+    }
+    const other = (await this.getStateAsync(vin + '.soc-levels.' + limit.other))?.val;
+    const otherLimit = Object.values(CHARGE_LIMITS).find((entry) => entry.key === limit.other);
+    if (!otherLimit || !isValidChargeLimit(other, otherLimit)) {
+      await this.reportCommandError(
+        vin,
+        path + ': the current ' + limit.other + ' is not known yet, try again after the next hourly poll. Nothing sent',
+      );
+      return;
+    }
+    if (await this.sendCommand(vin, path, this.kamereonUrl(KCM, vin, 'ev/soc-levels'), { [limit.key]: value, [limit.other]: other })) {
+      await this.setState(id, value, true);
+      // soc-levels is read hourly; show the accepted value at once
+      await this.setState(vin + '.soc-levels.' + limit.key, value, true);
+    }
   }
 
   /**

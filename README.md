@@ -35,6 +35,8 @@ Each vehicle is created as a device using its VIN. Remote commands are exposed a
 | `climateTemperature` | number  | `level.temperature` | target temperature in °C for the next start (default 21)    |
 | `chargingStart`      | boolean | `button.start`      | start charging (see below)                                  |
 | `chargingStop`       | boolean | `button.stop`       | stop charging                                               |
+| `chargeLimitMin`     | number  | `level`             | minimum charge level in %, 15 to 45 in steps of 5           |
+| `chargeLimitTarget`  | number  | `level`             | target charge level in %, 55 to 100 in steps of 5           |
 | `refreshAll`         | boolean | `button`            | poll all vehicle data now                                   |
 | `refreshBattery`     | boolean | `button`            | ask only the battery status, one minute later               |
 | `lastCommandError`   | string  | `text`              | error of the last command, empty after a successful command |
@@ -43,6 +45,10 @@ A button is pressed by writing `true`. The adapter resets it to `false` with `ac
 command was handled; `lastCommandError` tells whether the Renault cloud accepted it. The car carries
 it out afterwards, and the data states show the result after the next poll, for example
 `hvac-status.hvacStatus` and `battery-status.chargingStatus`.
+
+`chargeLimitMin` and `chargeLimitTarget` are sent together, so the adapter needs the other limit
+from `soc-levels`. It is read once per hour; right after the start a write waits for that first
+read. The current limits are in `soc-levels.socMin` and `soc-levels.socTarget`.
 
 `refreshBattery` is meant for scripts that follow the wallbox: it costs one request instead of a
 full poll. It waits one minute, so the car has time to upload its new state, merges all presses in
@@ -73,6 +79,7 @@ poll; these change slowly and are asked once per hour:
 | `charge-history` | charges per day                                   |
 | `charges`        | single charges                                    |
 | `pressure`       | tyre pressure per wheel in mbar and a status code |
+| `soc-levels`     | minimum and target charge level                   |
 
 ## Discussion / questions
 
@@ -87,6 +94,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it (Megane E-Tech, Scenic E-Tech, Renault 4, Renault 5, Alpine A290, Master E-Tech); the current limits are read once per hour into `soc-levels`
 - (typhosj) new channel `pressure` with the tyre pressure per wheel in mbar, read once per hour on models that report it
 - (typhosj) **Breaking change:** the remote states are renamed and are buttons for every model. `hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature`, `charging` becomes `chargingStart` and `chargingStop`, `refresh` becomes `refreshAll`, `lastError` becomes `lastCommandError`. The old states are removed on the first start and the target temperature is taken over. Adjust scripts and visualizations.
 - (typhosj) new button `remote.refreshBattery` asks only the battery status, one minute later and at most every three minutes, for scripts that follow the wallbox
