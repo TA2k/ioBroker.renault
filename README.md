@@ -153,10 +153,6 @@ programs on again in the app.
 **A remote state is missing.** The model does not support the command according to the table
 above; the adapter does not create it, and removes it if an older version had created it.
 
-## Discussion / questions
-
-ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-0-x>
-
 ## Changelog
 
 <!--
