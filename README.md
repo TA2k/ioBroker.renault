@@ -28,33 +28,36 @@ This adapter connects ioBroker to the My Renault / My Dacia / My Alpine cloud an
 
 Each vehicle is created as a device using its VIN. Remote commands are exposed as states under `renault.0.<VIN>.remote.*`:
 
-| State              | Type    | Role                       | Action                                                      |
-| ------------------ | ------- | -------------------------- | ----------------------------------------------------------- |
-| `hvac-start`       | boolean | `switch`                   | `true` = start, `false` = stop climate control              |
-| `hvac-temperature` | number  | `level.temperature`        | target temperature in °C for the next start (default 21)    |
-| `charging`         | boolean | `switch` or `button.start` | `true` = start, `false` = stop charging (see below)         |
-| `refresh`          | boolean | `button`                   | `true` = poll the vehicle data now                          |
-| `refreshBattery`   | boolean | `button`                   | `true` = ask only the battery status, one minute later      |
-| `lastError`        | string  | `text`                     | error of the last command, empty after a successful command |
+| State                | Type    | Role                | Action                                                      |
+| -------------------- | ------- | ------------------- | ----------------------------------------------------------- |
+| `climateStart`       | boolean | `button.start`      | start the climate control                                   |
+| `climateStop`        | boolean | `button.stop`       | stop the climate control                                    |
+| `climateTemperature` | number  | `level.temperature` | target temperature in °C for the next start (default 21)    |
+| `chargingStart`      | boolean | `button.start`      | start charging (see below)                                  |
+| `chargingStop`       | boolean | `button.stop`       | stop charging                                               |
+| `refreshAll`         | boolean | `button`            | poll all vehicle data now                                   |
+| `refreshBattery`     | boolean | `button`            | ask only the battery status, one minute later               |
+| `lastCommandError`   | string  | `text`              | error of the last command, empty after a successful command |
+
+A button is pressed by writing `true`. The adapter resets it to `false` with `ack: true` once the
+command was handled; `lastCommandError` tells whether the Renault cloud accepted it. The car carries
+it out afterwards, and the data states show the result after the next poll, for example
+`hvac-status.hvacStatus` and `battery-status.chargingStatus`.
 
 `refreshBattery` is meant for scripts that follow the wallbox: it costs one request instead of a
 full poll. It waits one minute, so the car has time to upload its new state, merges all presses in
 that minute, and asks the battery status of a vehicle at most every three minutes. Frequent use of
-`refresh` can exhaust the request quota of the account, which also blocks the My Renault app.
-
-A command state is set to the written value with `ack: true` once the Renault cloud accepted the
-command. The car carries it out afterwards; the data states show the result after the next poll.
+`refreshAll` can exhaust the request quota of the account, which also blocks the My Renault app.
 
 Which request a command sends, and which vehicle data the adapter polls, depends on the model. The
 adapter uses the endpoint table of [renault-api](https://github.com/hacf-fr/renault-api) (model code
 in `general.vehicleDetails.model.code`):
 
-- A command the model does not support is not created. `charging` is a start button (`button.start`)
-  on models that cannot stop charging remotely, for example the Megane E-Tech, Renault 4, Renault 5
-  and Alpine A290.
+- A button the model does not support is not created. Models that cannot stop charging remotely,
+  for example the Megane E-Tech, Renault 4, Renault 5 and Alpine A290, have no `chargingStop`.
 - Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech charge by schedule. On these
-  models `charging` = `true` **switches off all charge programs**, as the My Renault app does;
-  switch them on again in the app.
+  models `chargingStart` **switches off all charge programs**, as the My Renault app does; switch
+  them on again in the app.
 - Data the model does not provide is not polled, which saves requests.
 - A model renault-api does not list yet gets the default requests: every command and endpoint is tried,
   and unsupported endpoints are asked again once a day.
@@ -72,6 +75,7 @@ ioBroker forum: <https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-
 
 ### **WORK IN PROGRESS**
 
+- (typhosj) **Breaking change:** the remote states are renamed and are buttons for every model. `hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature`, `charging` becomes `chargingStart` and `chargingStop`, `refresh` becomes `refreshAll`, `lastError` becomes `lastCommandError`. The old states are removed on the first start and the target temperature is taken over. Adjust scripts and visualizations.
 - (typhosj) new button `remote.refreshBattery` asks only the battery status, one minute later and at most every three minutes, for scripts that follow the wallbox
 - (typhosj) an endpoint that has answered with server errors for 24 hours is asked only hourly until it answers again
 - (typhosj) `hvac-temperature` starts at 21 °C instead of empty

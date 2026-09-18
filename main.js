@@ -106,7 +106,7 @@ const VEHICLE_ENDPOINTS = require('./lib/vehicleEndpoints.json').models;
 /** @typedef {{ base: string, endpoint: string, body: { type: string, attributes: Record<string, unknown> } }} CommandRequest */
 /**
  * @typedef {object} RemoteCommand
- * @property {string} name label of the state
+ * @property {string} name what the command controls, for the state names
  * @property {string} start table key of the start request
  * @property {string} stop table key of the stop request
  * @property {(mode: string, on: boolean) => CommandRequest | 'settings' | null} request null when the
@@ -114,15 +114,14 @@ const VEHICLE_ENDPOINTS = require('./lib/vehicleEndpoints.json').models;
  */
 
 /**
- * Boolean remote commands, keyed by the state below <vin>.remote. Endpoints and bodies follow
- * renault-api (renault_vehicle.py). State ids carry no "/", which the object structure check of
- * the repositories bot warns about (W3001).
+ * Remote commands, each with a start and a stop button below <vin>.remote (commandStateId). A model
+ * gets only the buttons it supports. Endpoints and bodies follow renault-api (renault_vehicle.py).
  *
  * @type {Record<string, RemoteCommand>}
  */
 const REMOTE_COMMANDS = {
-  'hvac-start': {
-    name: 'Climate control',
+  climate: {
+    name: 'climate control',
     start: 'actions/hvac-start',
     stop: 'actions/hvac-stop',
     request: (mode, on) => ({
@@ -132,7 +131,7 @@ const REMOTE_COMMANDS = {
     }),
   },
   charging: {
-    name: 'Charging',
+    name: 'charging',
     start: 'actions/charge-start',
     stop: 'actions/charge-stop',
     request: (mode, on) => {
@@ -158,12 +157,25 @@ const REMOTE_COMMANDS = {
   },
 };
 
-/** Remote state ids of versions before 1.0.0 and the state that replaces them, removed once per vehicle. */
+/**
+ * @param {string} command key of REMOTE_COMMANDS
+ * @param {boolean} on
+ */
+function commandStateId(command, on) {
+  return command + (on ? 'Start' : 'Stop');
+}
+
+/** Remote state ids of earlier versions and the states that replace them, removed once per vehicle. */
 const LEGACY_REMOTE_IDS = {
-  'actions/hvac-start': 'hvac-start',
-  'actions/charging-start': 'charging',
-  'charge/pause-resume': 'charging',
-  'charge/start': 'charging',
+  'actions/hvac-start': 'climateStart and climateStop',
+  'actions/charging-start': 'chargingStart and chargingStop',
+  'charge/pause-resume': 'chargingStart and chargingStop',
+  'charge/start': 'chargingStart',
+  'hvac-start': 'climateStart and climateStop',
+  'hvac-temperature': 'climateTemperature',
+  charging: 'chargingStart and chargingStop',
+  refresh: 'refreshAll',
+  lastError: 'lastCommandError',
 };
 
 /**
@@ -186,6 +198,7 @@ function isPlaceholder(body) {
  * positive number is required and the cloud rejects the rest.
  *
  * @param {unknown} value
+ * @returns {value is number}
  */
 function isValidTemperature(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
@@ -644,35 +657,37 @@ class Renault extends utils.Adapter {
           const remoteObjects = [];
           /** @type {string[]} */
           const unsupported = [];
-          for (const [id, command] of Object.entries(REMOTE_COMMANDS)) {
-            if (this.endpointMode(device.vin, command.start) === null) {
-              unsupported.push(id);
-              continue;
-            }
-            const stops = this.endpointMode(device.vin, command.stop) !== null;
-            remoteObjects.push({
-              id,
-              name: command.name + (stops ? ': true = start, false = stop' : ': true = start'),
-              type: 'boolean',
-              role: stops ? 'switch' : 'button.start',
-              read: stops,
-            });
-            if (id === 'hvac-start') {
+          for (const [key, command] of Object.entries(REMOTE_COMMANDS)) {
+            for (const on of [true, false]) {
+              const id = commandStateId(key, on);
+              if (!this.commandRequest(device.vin, command, on)) {
+                unsupported.push(id);
+                continue;
+              }
               remoteObjects.push({
-                id: 'hvac-temperature',
-                name: 'Climate control target temperature',
-                type: 'number',
-                role: 'level.temperature',
-                unit: '°C',
-                def: DEFAULT_TEMPERATURE,
+                id,
+                name: (on ? 'Start ' : 'Stop ') + command.name,
+                type: 'boolean',
+                role: on ? 'button.start' : 'button.stop',
+                read: false,
               });
             }
           }
-          if (unsupported.includes('hvac-start')) {
-            unsupported.push('hvac-temperature');
+          const climate = !unsupported.includes('climateStart');
+          if (climate) {
+            remoteObjects.push({
+              id: 'climateTemperature',
+              name: 'Climate control target temperature',
+              type: 'number',
+              role: 'level.temperature',
+              unit: '°C',
+              def: DEFAULT_TEMPERATURE,
+            });
+          } else {
+            unsupported.push('climateTemperature');
           }
           remoteObjects.push(
-            { id: 'refresh', name: 'Refresh vehicle data', type: 'boolean', role: 'button', read: false },
+            { id: 'refreshAll', name: 'Refresh all vehicle data', type: 'boolean', role: 'button', read: false },
             {
               id: 'refreshBattery',
               name: 'Refresh only the battery status, one minute later',
@@ -680,8 +695,16 @@ class Renault extends utils.Adapter {
               role: 'button',
               read: false,
             },
-            { id: 'lastError', name: 'Error of the last command, empty after a success', type: 'string', role: 'text', write: false },
+            {
+              id: 'lastCommandError',
+              name: 'Error of the last command, empty after a success',
+              type: 'string',
+              role: 'text',
+              write: false,
+            },
           );
+          // read before the old state is removed, so the chosen temperature survives the rename
+          const legacyTemperature = (await this.getStateAsync(device.vin + '.remote.hvac-temperature'))?.val;
           const removed = [
             ...Object.entries(LEGACY_REMOTE_IDS).map(([legacy, replacement]) => ({ id: legacy, note: 'use ' + replacement })),
             ...unsupported.map((id) => ({ id, note: 'the model does not support it' })),
@@ -713,10 +736,10 @@ class Renault extends utils.Adapter {
               native: {},
             });
           }
-          if (!unsupported.includes('hvac-start')) {
-            const temperatureId = device.vin + '.remote.hvac-temperature';
+          if (climate) {
+            const temperatureId = device.vin + '.remote.climateTemperature';
             if ((await this.getStateAsync(temperatureId))?.val == null) {
-              await this.setState(temperatureId, DEFAULT_TEMPERATURE, true);
+              await this.setState(temperatureId, isValidTemperature(legacyTemperature) ? legacyTemperature : DEFAULT_TEMPERATURE, true);
             }
           }
           delete device.mileage;
@@ -1340,11 +1363,11 @@ class Renault extends utils.Adapter {
     if (channel !== 'remote' || !this.deviceArray.includes(vin)) {
       return;
     }
-    if (path === 'hvac-temperature') {
+    if (path === 'climateTemperature') {
       if (isValidTemperature(state.val)) {
         await this.setState(id, state.val, true);
       } else {
-        this.log.warn('hvac-temperature must be a number above 0, got ' + JSON.stringify(state.val) + '. Value ignored');
+        this.log.warn('climateTemperature must be a number above 0, got ' + JSON.stringify(state.val) + '. Value ignored');
       }
       return;
     }
@@ -1360,7 +1383,7 @@ class Renault extends utils.Adapter {
       await this.setState(id, false, true);
       return;
     }
-    if (path === 'refresh') {
+    if (path === 'refreshAll') {
       this.log.info('Force refresh');
       try {
         await this.pollNow();
@@ -1372,66 +1395,90 @@ class Renault extends utils.Adapter {
       }
       return;
     }
-    if (!Object.hasOwn(REMOTE_COMMANDS, path)) {
+    const [, key, action] = /^(.+)(Start|Stop)$/.exec(path) ?? [];
+    if (!key || !Object.hasOwn(REMOTE_COMMANDS, key)) {
       this.log.debug('No command behind ' + path + ', nothing sent');
       return;
     }
-    if (typeof state.val !== 'boolean') {
-      await this.reportCommandError(vin, path + ' takes true or false, got ' + JSON.stringify(state.val) + '. Nothing sent');
-      return;
+    try {
+      if (state.val === true) {
+        await this.runCommand(vin, path, REMOTE_COMMANDS[key], action === 'Start');
+      } else if (state.val !== false) {
+        await this.reportCommandError(vin, path + ' is a button and takes true, got ' + JSON.stringify(state.val) + '. Nothing sent');
+      }
+    } finally {
+      // a button is confirmed by resetting it; the outcome is in lastCommandError
+      await this.setState(id, false, true);
     }
-    const on = state.val;
-    const command = REMOTE_COMMANDS[path];
-    const mode = this.endpointMode(vin, on ? command.start : command.stop);
-    const request = mode === null ? null : command.request(mode, on);
+  }
+
+  /**
+   * The request that starts or stops a command on this vehicle, null when the model does not
+   * support it. A model that cannot start a command cannot stop it either.
+   *
+   * @param {string} vin
+   * @param {RemoteCommand} command
+   * @param {boolean} on
+   */
+  commandRequest(vin, command, on) {
+    const startMode = this.endpointMode(vin, command.start);
+    const mode = on || startMode === null ? startMode : this.endpointMode(vin, command.stop);
+    return mode === null ? null : command.request(mode, on);
+  }
+
+  /**
+   * @param {string} vin
+   * @param {string} path state id below remote, used as command name
+   * @param {RemoteCommand} command
+   * @param {boolean} on
+   */
+  async runCommand(vin, path, command, on) {
+    const request = this.commandRequest(vin, command, on);
     if (!request) {
-      await this.reportCommandError(vin, path + ' cannot ' + (on ? 'start' : 'stop') + ' on this model. Nothing sent');
+      await this.reportCommandError(vin, path + ' is not supported on this model. Nothing sent');
       return;
     }
-    // A model that cannot stop gets a start button, which is confirmed by resetting it.
-    const confirm = this.endpointMode(vin, command.stop) === null ? false : on;
     if (request === 'settings') {
-      await this.startChargingViaSettings(id, vin, confirm);
+      await this.startChargingViaSettings(vin, path);
       return;
     }
     const body = request.body;
-    if (path === 'hvac-start' && on) {
-      const temperature = (await this.getStateAsync(vin + '.remote.hvac-temperature'))?.val ?? DEFAULT_TEMPERATURE;
+    if (command === REMOTE_COMMANDS.climate && on) {
+      const temperature = (await this.getStateAsync(vin + '.remote.climateTemperature'))?.val ?? DEFAULT_TEMPERATURE;
       if (!isValidTemperature(temperature)) {
         await this.reportCommandError(
           vin,
-          'hvac-temperature must be a number above 0, got ' + JSON.stringify(temperature) + '. Nothing sent',
+          'climateTemperature must be a number above 0, got ' + JSON.stringify(temperature) + '. Nothing sent',
         );
         return;
       }
       body.attributes = { ...body.attributes, targetTemperature: temperature };
     }
-    await this.sendCommand(id, vin, path, this.kamereonUrl(request.base, vin, request.endpoint), { data: body }, confirm);
+    await this.sendCommand(vin, path, this.kamereonUrl(request.base, vin, request.endpoint), { data: body });
   }
 
   /**
    * Vehicles that charge by schedule start charging when every program is switched off
    * (renault-api, same as the My Renault app). Only the app switches them on again.
    *
-   * @param {string} id
    * @param {string} vin
-   * @param {ioBroker.StateValue} confirm value written with ack after the cloud accepted
+   * @param {string} name command name for log and lastCommandError
    */
-  async startChargingViaSettings(id, vin, confirm) {
+  async startChargingViaSettings(vin, name) {
     const url = this.kamereonUrl(KCM, vin, 'ev/settings');
     let settings;
     try {
       settings = (await this.requestClient({ method: 'get', url, headers: this.commandHeaders() })).data;
     } catch (error) {
-      await this.reportCommandError(vin, 'charging failed, reading the charge settings failed: ' + error.message);
+      await this.reportCommandError(vin, name + ' failed, reading the charge settings failed: ' + error.message);
       return;
     }
     if (!settings || typeof settings !== 'object' || !Array.isArray(settings.programs)) {
-      await this.reportCommandError(vin, 'charging failed, the charge settings have no program list. Nothing sent');
+      await this.reportCommandError(vin, name + ' failed, the charge settings have no program list. Nothing sent');
       return;
     }
     const body = { ...settings, programs: settings.programs.map((program) => ({ ...program, programActivationStatus: false })) };
-    await this.sendCommand(id, vin, 'charging', url, body, confirm);
+    await this.sendCommand(vin, name, url, body);
   }
 
   /**
@@ -1467,33 +1514,30 @@ class Renault extends utils.Adapter {
   }
 
   /**
-   * POST a command, confirm the state on success and record the outcome in remote.lastError.
+   * POST a command and record the outcome in remote.lastCommandError.
    * Polls 20 seconds later, so the result shows up in the data states.
    *
-   * @param {string} id full id of the command state
    * @param {string} vin
-   * @param {string} name command name for log and lastError
+   * @param {string} name command name for log and lastCommandError
    * @param {string} url
    * @param {unknown} data request body
-   * @param {ioBroker.StateValue} val value to confirm
    * @returns {Promise<boolean>} true when the cloud accepted the command
    */
-  async sendCommand(id, vin, name, url, data, val) {
+  async sendCommand(vin, name, url, data) {
     this.log.debug(name + ' for ' + vin + ': ' + JSON.stringify(data));
     let accepted = false;
     try {
       const res = await this.requestClient({ method: 'post', url, headers: this.commandHeaders(), data });
       this.log.info('Command ' + name + ' for ' + vin + ' accepted');
       this.log.debug(JSON.stringify(res.data));
-      await this.setState(id, val, true);
-      await this.setState(vin + '.remote.lastError', '', true);
+      await this.setState(vin + '.remote.lastCommandError', '', true);
       accepted = true;
     } catch (error) {
       const code = error.response?.data?.errors?.[0]?.errorCode;
       const message = 'Command ' + name + ' failed: ' + error.message + (code ? ' (' + code + ')' : '');
       this.log.error(message + ' for ' + vin);
       error.response && this.log.debug(JSON.stringify(error.response.data));
-      await this.setState(vin + '.remote.lastError', message, true);
+      await this.setState(vin + '.remote.lastCommandError', message, true);
     }
     this.schedulePoll(20 * 1000);
     return accepted;
@@ -1505,7 +1549,7 @@ class Renault extends utils.Adapter {
    */
   async reportCommandError(vin, message) {
     this.log.warn(message + ' (' + vin + ')');
-    await this.setState(vin + '.remote.lastError', message, true);
+    await this.setState(vin + '.remote.lastCommandError', message, true);
   }
 }
 

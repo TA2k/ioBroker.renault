@@ -141,8 +141,8 @@ describe('token refresh', () => {
 
 describe('refresh command', () => {
   const press = async (adapter) => {
-    await adapter.setState('renault.0.VIN1.remote.refresh', true, false);
-    await adapter.onStateChange('renault.0.VIN1.remote.refresh', userWrite(true));
+    await adapter.setState('renault.0.VIN1.remote.refreshAll', true, false);
+    await adapter.onStateChange('renault.0.VIN1.remote.refreshAll', userWrite(true));
   };
 
   it('resets the button to false with ack after the poll', async () => {
@@ -151,8 +151,8 @@ describe('refresh command', () => {
     adapter.requestClient.resetHistory();
     await press(adapter);
     expect(urls(adapter).some((url) => url.includes('/battery-status'))).to.equal(true);
-    expect(adapter.states['VIN1.remote.refresh']).to.equal(false);
-    expect(adapter.acks['VIN1.remote.refresh']).to.equal(true);
+    expect(adapter.states['VIN1.remote.refreshAll']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refreshAll']).to.equal(true);
   });
 
   it('resets the button also when the poll is skipped because one runs', async () => {
@@ -160,8 +160,8 @@ describe('refresh command', () => {
     await adapter.onReady();
     adapter.polling = true;
     await press(adapter);
-    expect(adapter.states['VIN1.remote.refresh']).to.equal(false);
-    expect(adapter.acks['VIN1.remote.refresh']).to.equal(true);
+    expect(adapter.states['VIN1.remote.refreshAll']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refreshAll']).to.equal(true);
   });
 
   it('resets the button also when the poll fails', async () => {
@@ -169,13 +169,13 @@ describe('refresh command', () => {
     await adapter.onReady();
     adapter.updateDevices = () => Promise.reject(new Error('boom'));
     await press(adapter).catch(() => {});
-    expect(adapter.states['VIN1.remote.refresh']).to.equal(false);
-    expect(adapter.acks['VIN1.remote.refresh']).to.equal(true);
+    expect(adapter.states['VIN1.remote.refreshAll']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.refreshAll']).to.equal(true);
   });
 
   it('does not throw before an account is known', async () => {
     const adapter = setup();
-    await adapter.onStateChange('renault.0.VIN1.remote.refresh', userWrite(true));
+    await adapter.onStateChange('renault.0.VIN1.remote.refreshAll', userWrite(true));
     expect(adapter.requestClient.called).to.equal(false);
   });
 
@@ -496,7 +496,7 @@ describe('poll scheduling', () => {
     adapter.requestClient = setup({ '/battery-status': () => gate }).requestClient;
     const running = adapter.pollNow();
     await adapter.pollNow();
-    await adapter.onStateChange('renault.0.VIN1.remote.refresh', userWrite(true));
+    await adapter.onStateChange('renault.0.VIN1.remote.refreshAll', userWrite(true));
     expect(battery(adapter)).to.have.length(1);
     release({});
     await running;
@@ -508,7 +508,7 @@ describe('poll scheduling', () => {
     const adapter = setup();
     await adapter.onReady();
     const pending = adapter.timeouts[0];
-    await adapter.onStateChange('renault.0.VIN1.remote.hvac-start', userWrite(true));
+    await adapter.onStateChange('renault.0.VIN1.remote.climateStart', userWrite(true));
     expect(adapter.clearTimeout.calledWith(pending)).to.equal(true);
     expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
   });
@@ -1219,120 +1219,128 @@ describe('commands', () => {
   const KCA_HVAC = '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/hvac-start?';
   const KCA_CHARGE = '/kamereon/kca/car-adapter/v1/cars/VIN1/actions/charging-start?';
   const KCM_PAUSE = '/kamereon/kcm/v1/vehicles/VIN1/charge/pause-resume?';
-  /** @type {[string | undefined, string, boolean, string, object][]} model code (undefined = not documented), state, value, url, body */
+  /** @type {[string | undefined, string, string, object][]} model code (undefined = not documented), button, url, body */
   const cases = [
-    [undefined, 'hvac-start', true, KCA_HVAC, { type: 'HvacStart', attributes: { action: 'start', targetTemperature: 21 } }],
-    [undefined, 'hvac-start', false, KCA_HVAC, { type: 'HvacStart', attributes: { action: 'cancel' } }],
-    ['XBG1VE', 'hvac-start', false, KCA_HVAC, { type: 'HvacStart', attributes: { action: 'stop' } }],
-    [undefined, 'charging', true, KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'start' } }],
-    [undefined, 'charging', false, KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'stop' } }],
-    ['X102VE', 'charging', true, KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'start' } }],
-    ['X102VE', 'charging', false, KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'pause' } }],
-    ['XBG1VE', 'charging', true, KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'resume' } }],
-    ['XBG1VE', 'charging', false, KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'pause' } }],
-    [
-      'XCB1VE',
-      'charging',
-      true,
-      '/kamereon/kcm/v1/vehicles/VIN1/charge/start?',
-      { type: 'ChargingStart', attributes: { action: 'start' } },
-    ],
+    [undefined, 'climateStart', KCA_HVAC, { type: 'HvacStart', attributes: { action: 'start', targetTemperature: 21 } }],
+    [undefined, 'climateStop', KCA_HVAC, { type: 'HvacStart', attributes: { action: 'cancel' } }],
+    ['XBG1VE', 'climateStop', KCA_HVAC, { type: 'HvacStart', attributes: { action: 'stop' } }],
+    [undefined, 'chargingStart', KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'start' } }],
+    [undefined, 'chargingStop', KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'stop' } }],
+    ['X102VE', 'chargingStart', KCA_CHARGE, { type: 'ChargingStart', attributes: { action: 'start' } }],
+    ['X102VE', 'chargingStop', KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'pause' } }],
+    ['XBG1VE', 'chargingStart', KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'resume' } }],
+    ['XBG1VE', 'chargingStop', KCM_PAUSE, { type: 'ChargePauseResume', attributes: { action: 'pause' } }],
+    ['XCB1VE', 'chargingStart', '/kamereon/kcm/v1/vehicles/VIN1/charge/start?', { type: 'ChargingStart', attributes: { action: 'start' } }],
   ];
-  for (const [code, path, val, url, body] of cases) {
-    it(`sends ${path} = ${val} for model ${code ?? 'unknown'} and confirms it`, async () => {
+  for (const [code, path, url, body] of cases) {
+    it(`sends ${path} for model ${code ?? 'unknown'} and resets the button`, async () => {
       const adapter = await ready({}, code);
-      await write(adapter, path, val);
+      await write(adapter, path, true);
       expect(posts(adapter)).to.have.length(1);
       expect(posts(adapter)[0].url)
         .to.include(url)
         .and.to.match(/country=de$/);
       expect(posts(adapter)[0].data).to.deep.equal({ data: body });
-      // a start button (the model cannot stop) is reset to false, a switch keeps the value
-      expect(adapter.states['VIN1.remote.' + path]).to.equal(code === 'XCB1VE' ? false : val);
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(false);
       expect(adapter.acks['VIN1.remote.' + path]).to.equal(true);
-      expect(adapter.states['VIN1.remote.lastError']).to.equal('');
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.equal('');
       expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
     });
   }
 
   for (const code of ['XCB1VE', 'R5E1VE', 'A5E1AE']) {
-    it(`sends nothing for charging = false on model ${code}, which cannot stop`, async () => {
+    it(`creates no chargingStop and sends nothing for it on model ${code}, which cannot stop`, async () => {
       const adapter = await ready({}, code);
-      await write(adapter, 'charging', false);
+      expect(adapter.objects.has('renault.0.VIN1.remote.chargingStop')).to.equal(false);
+      await write(adapter, 'chargingStop', true);
       expect(adapter.requestClient.called).to.equal(false);
-      expect(adapter.states['VIN1.remote.lastError']).to.include('charging cannot stop');
-      expect(adapter.acks['VIN1.remote.charging']).to.equal(false);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('chargingStop is not supported');
+      expect(adapter.acks['VIN1.remote.chargingStop']).to.equal(true);
     });
   }
 
   it('sends nothing for a command the model does not support', async () => {
     const adapter = await ready({}, 'XJA1VP');
-    await write(adapter, 'charging', true);
-    await write(adapter, 'hvac-start', true);
+    await write(adapter, 'chargingStart', true);
+    await write(adapter, 'climateStart', true);
     expect(adapter.requestClient.called).to.equal(false);
-    expect(adapter.states['VIN1.remote.lastError']).to.include('cannot start');
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('climateStart is not supported');
   });
 
   for (const val of ['true', 1, null]) {
-    it(`rejects the non-boolean command value ${JSON.stringify(val)}`, async () => {
+    it(`rejects the button value ${JSON.stringify(val)} and resets the button`, async () => {
       const adapter = await ready();
-      await write(adapter, 'charging', val);
+      await write(adapter, 'chargingStart', val);
       expect(posts(adapter)).to.deep.equal([]);
-      expect(adapter.states['VIN1.remote.lastError']).to.include('true or false');
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('takes true');
+      expect(adapter.states['VIN1.remote.chargingStart']).to.equal(false);
+      expect(adapter.acks['VIN1.remote.chargingStart']).to.equal(true);
     });
   }
 
-  it('records a failed command and leaves it unconfirmed', async () => {
+  it('sends nothing and reports nothing for a button written with false', async () => {
+    const adapter = await ready();
+    await write(adapter, 'chargingStop', false);
+    expect(posts(adapter)).to.deep.equal([]);
+    expect(adapter.log.warn.called).to.equal(false);
+    expect(adapter.acks['VIN1.remote.chargingStop']).to.equal(true);
+  });
+
+  it('records a failed command and resets the button', async () => {
     const error = httpError(403, {}, { errors: [{ errorCode: 'err.func.wired.forbidden' }] });
     const adapter = await ready({ '/actions/charging-start': error });
-    await write(adapter, 'charging', true);
-    expect(adapter.acks['VIN1.remote.charging']).to.equal(false);
-    expect(adapter.states['VIN1.remote.lastError']).to.include('charging').and.to.include('err.func.wired.forbidden');
+    await write(adapter, 'chargingStart', true);
+    expect(adapter.states['VIN1.remote.chargingStart']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.chargingStart']).to.equal(true);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('chargingStart').and.to.include('err.func.wired.forbidden');
     expect(adapter.timeouts.at(-1)?.ms).to.equal(20 * 1000);
   });
 
   for (const temperature of [NaN, 'abc', 0, -1, Infinity, '21']) {
     it(`does not start the climate control with target temperature ${String(temperature)}`, async () => {
       const adapter = await ready();
-      adapter.states['VIN1.remote.hvac-temperature'] = temperature;
-      await write(adapter, 'hvac-start', true);
+      adapter.states['VIN1.remote.climateTemperature'] = temperature;
+      await write(adapter, 'climateStart', true);
       expect(posts(adapter)).to.deep.equal([]);
-      expect(adapter.states['VIN1.remote.lastError']).to.include('hvac-temperature');
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('climateTemperature');
     });
   }
 
   for (const temperature of [0.1, 21, 30]) {
     it(`starts the climate control with target temperature ${temperature}`, async () => {
       const adapter = await ready();
-      adapter.states['VIN1.remote.hvac-temperature'] = temperature;
-      await write(adapter, 'hvac-start', true);
+      adapter.states['VIN1.remote.climateTemperature'] = temperature;
+      await write(adapter, 'climateStart', true);
       expect(posts(adapter)[0].data.data.attributes.targetTemperature).to.equal(temperature);
     });
   }
 
   it('does not check the temperature when the climate control is stopped', async () => {
     const adapter = await ready();
-    adapter.states['VIN1.remote.hvac-temperature'] = NaN;
-    await write(adapter, 'hvac-start', false);
+    adapter.states['VIN1.remote.climateTemperature'] = NaN;
+    await write(adapter, 'climateStop', true);
     expect(posts(adapter)).to.have.length(1);
   });
 
   it('confirms a valid target temperature and rejects an invalid one', async () => {
     const adapter = await ready();
-    await write(adapter, 'hvac-temperature', 22);
-    expect(adapter.acks['VIN1.remote.hvac-temperature']).to.equal(true);
-    await write(adapter, 'hvac-temperature', 0);
-    expect(adapter.acks['VIN1.remote.hvac-temperature']).to.equal(false);
-    expect(logged(adapter.log.warn).some((line) => line.includes('hvac-temperature'))).to.equal(true);
+    await write(adapter, 'climateTemperature', 22);
+    expect(adapter.acks['VIN1.remote.climateTemperature']).to.equal(true);
+    await write(adapter, 'climateTemperature', 0);
+    expect(adapter.acks['VIN1.remote.climateTemperature']).to.equal(false);
+    expect(logged(adapter.log.warn).some((line) => line.includes('climateTemperature'))).to.equal(true);
     expect(posts(adapter)).to.deep.equal([]);
   });
 
   for (const id of [
     'renault.0.VIN1.remote.unknown',
-    'renault.0.VIN1.remote.lastError',
+    'renault.0.VIN1.remote.lastCommandError',
     'renault.0.VIN1.remote.toString',
+    'renault.0.VIN1.remote.toStringStart',
+    'renault.0.VIN1.remote.Start',
+    'renault.0.VIN1.remote.hvac-start',
     'renault.0.VIN1.general.vin',
-    'renault.0.OTHER.remote.charging',
+    'renault.0.OTHER.remote.chargingStart',
   ]) {
     it(`sends nothing for a write to ${id}`, async () => {
       const adapter = await ready();
@@ -1344,7 +1352,7 @@ describe('commands', () => {
   it('ignores acknowledged values', async () => {
     const adapter = await ready();
     await adapter.onStateChange(
-      'renault.0.VIN1.remote.charging',
+      'renault.0.VIN1.remote.chargingStart',
       /** @type {ioBroker.State} */ (/** @type {unknown} */ ({ val: true, ack: true })),
     );
     expect(posts(adapter)).to.deep.equal([]);
@@ -1355,72 +1363,115 @@ describe('target temperature', () => {
   it('declares 21 °C as default and writes it when the state is empty', async () => {
     const adapter = setup();
     await adapter.onReady();
-    expect(adapter.objects.get('renault.0.VIN1.remote.hvac-temperature')?.common).to.include({ def: 21 });
-    expect(adapter.states['VIN1.remote.hvac-temperature']).to.equal(21);
-    expect(adapter.acks['VIN1.remote.hvac-temperature']).to.equal(true);
+    expect(adapter.objects.get('renault.0.VIN1.remote.climateTemperature')?.common).to.include({ def: 21 });
+    expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(21);
+    expect(adapter.acks['VIN1.remote.climateTemperature']).to.equal(true);
   });
 
   for (const empty of [null, undefined]) {
     it(`writes the default over a stored ${empty}`, async () => {
       const adapter = setup();
-      adapter.states['VIN1.remote.hvac-temperature'] = empty;
+      adapter.states['VIN1.remote.climateTemperature'] = empty;
       await adapter.onReady();
-      expect(adapter.states['VIN1.remote.hvac-temperature']).to.equal(21);
+      expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(21);
     });
   }
 
   for (const kept of [18, 0]) {
     it(`keeps a stored value ${kept}`, async () => {
       const adapter = setup();
-      adapter.states['VIN1.remote.hvac-temperature'] = kept;
+      adapter.states['VIN1.remote.climateTemperature'] = kept;
       await adapter.onReady();
       await adapter.getDeviceList();
-      expect(adapter.states['VIN1.remote.hvac-temperature']).to.equal(kept);
+      expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(kept);
     });
   }
+
+  it('takes over the temperature of hvac-temperature from earlier versions', async () => {
+    const adapter = setup();
+    adapter.states['VIN1.remote.hvac-temperature'] = 18;
+    await adapter.onReady();
+    expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(18);
+  });
+
+  for (const invalid of [0, -1, NaN, '19', null]) {
+    it(`writes the default instead of the earlier hvac-temperature ${String(invalid)}`, async () => {
+      const adapter = setup();
+      adapter.states['VIN1.remote.hvac-temperature'] = invalid;
+      await adapter.onReady();
+      expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(21);
+    });
+  }
+
+  it('does not overwrite climateTemperature with the earlier hvac-temperature', async () => {
+    const adapter = setup();
+    adapter.states['VIN1.remote.hvac-temperature'] = 18;
+    adapter.states['VIN1.remote.climateTemperature'] = 23;
+    await adapter.onReady();
+    expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(23);
+  });
 
   it('writes no temperature for a model without climate control', async () => {
     const adapter = setup({ '/vehicles?': vehicleOf('XJA1VP') });
     await adapter.onReady();
-    expect(adapter.states).to.not.have.property('VIN1.remote.hvac-temperature');
+    expect(adapter.states).to.not.have.property('VIN1.remote.climateTemperature');
   });
 });
 
 describe('remote objects', () => {
   const common = (adapter, id) => adapter.objects.get('renault.0.VIN1.remote.' + id)?.common;
+  const remoteIds = (adapter) =>
+    [...adapter.objects.keys()]
+      .filter((id) => id.startsWith('renault.0.VIN1.remote.'))
+      .map((id) => id.slice('renault.0.VIN1.remote.'.length))
+      .sort();
+  const deletedRemote = (adapter) => adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'));
 
   it('creates the remote states with roles that match their use', async () => {
     const adapter = setup();
     await adapter.onReady();
-    for (const id of ['hvac-start', 'charging']) {
-      expect(common(adapter, id)).to.include({ type: 'boolean', role: 'switch', read: true, write: true });
+    for (const id of ['climateStart', 'chargingStart']) {
+      expect(common(adapter, id)).to.include({ type: 'boolean', role: 'button.start', read: false, write: true });
     }
-    expect(common(adapter, 'hvac-temperature')).to.include({
+    for (const id of ['climateStop', 'chargingStop']) {
+      expect(common(adapter, id)).to.include({ type: 'boolean', role: 'button.stop', read: false, write: true });
+    }
+    expect(common(adapter, 'climateTemperature')).to.include({
       type: 'number',
       role: 'level.temperature',
       unit: '°C',
       read: true,
       write: true,
     });
-    expect(common(adapter, 'refresh')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
+    expect(common(adapter, 'refreshAll')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
     expect(common(adapter, 'refreshBattery')).to.include({ type: 'boolean', role: 'button', read: false, write: true });
-    expect(common(adapter, 'lastError')).to.include({ type: 'string', role: 'text', read: true, write: false });
+    expect(common(adapter, 'lastCommandError')).to.include({ type: 'string', role: 'text', read: true, write: false });
   });
 
   it('updates states created by older versions', async () => {
     const adapter = setup();
-    adapter.objects.set('renault.0.VIN1.remote.refresh', {
-      _id: 'renault.0.VIN1.remote.refresh',
+    adapter.objects.set('renault.0.VIN1.remote.refreshAll', {
+      _id: 'renault.0.VIN1.remote.refreshAll',
       type: 'state',
       common: { name: 'True = Refresh Data', type: 'boolean', role: 'button', read: true, write: true },
       native: {},
     });
     await adapter.onReady();
-    expect(common(adapter, 'refresh')).to.include({ name: 'Refresh vehicle data', read: false });
+    expect(common(adapter, 'refreshAll')).to.include({ name: 'Refresh all vehicle data', read: false });
   });
 
-  it('replaces the command states with a slash in their id once', async () => {
-    const legacy = ['actions/hvac-start', 'actions/charging-start', 'charge/pause-resume', 'charge/start'];
+  it('replaces the states of earlier versions once', async () => {
+    const legacy = [
+      'actions/hvac-start',
+      'actions/charging-start',
+      'charge/pause-resume',
+      'charge/start',
+      'hvac-start',
+      'hvac-temperature',
+      'charging',
+      'refresh',
+      'lastError',
+    ];
     const adapter = setup();
     for (const id of legacy) {
       adapter.objects.set('renault.0.VIN1.remote.' + id, {
@@ -1431,51 +1482,60 @@ describe('remote objects', () => {
       });
     }
     await adapter.onReady();
-    expect(adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'))).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
-    expect([...adapter.objects.keys()].filter((id) => id.includes('/'))).to.deep.equal([]);
-    for (const id of ['hvac-start', 'charging']) {
-      expect(common(adapter, id)).to.not.equal(undefined);
-    }
+    expect(deletedRemote(adapter)).to.deep.equal(legacy.map((id) => 'VIN1.remote.' + id));
+    expect(remoteIds(adapter)).to.deep.equal([
+      'chargingStart',
+      'chargingStop',
+      'climateStart',
+      'climateStop',
+      'climateTemperature',
+      'lastCommandError',
+      'refreshAll',
+      'refreshBattery',
+    ]);
+    const removals = logged(adapter.log.info).filter((line) => line.startsWith('Removed VIN1.remote.'));
+    expect(removals).to.have.length(legacy.length);
+    expect(removals.find((line) => line.includes('.hvac-start,'))).to.include('climateStart and climateStop');
     await adapter.getDeviceList();
-    expect(adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'))).to.have.length(legacy.length);
+    expect(deletedRemote(adapter)).to.have.length(legacy.length);
   });
 
-  it('creates only the commands the model supports, with the role its stop support allows', async () => {
-    const roles = async (code) => {
+  it('creates only the buttons the model supports', async () => {
+    const ids = async (code) => {
       const adapter = setup({ '/vehicles?': vehicleOf(code) });
       await adapter.onReady();
-      return Object.fromEntries(
-        ['hvac-start', 'hvac-temperature', 'charging'].map((id) => [id, adapter.objects.get('renault.0.VIN1.remote.' + id)?.common.role]),
-      );
+      return remoteIds(adapter);
     };
-    expect(await roles('X102VE')).to.deep.equal({ 'hvac-start': 'switch', 'hvac-temperature': 'level.temperature', charging: 'switch' });
-    expect(await roles('R5E1VE')).to.deep.equal({
-      'hvac-start': 'switch',
-      'hvac-temperature': 'level.temperature',
-      charging: 'button.start',
-    });
-    expect(await roles('XJA1VP')).to.deep.equal({ 'hvac-start': undefined, 'hvac-temperature': undefined, charging: undefined });
+    const always = ['lastCommandError', 'refreshAll', 'refreshBattery'];
+    const all = ['chargingStart', 'chargingStop', 'climateStart', 'climateStop', 'climateTemperature', ...always];
+    expect(await ids('X102VE')).to.deep.equal(all);
+    expect(await ids('R5E1VE')).to.deep.equal(all.filter((id) => id !== 'chargingStop'));
+    expect(await ids('XJA1VP')).to.deep.equal(always);
   });
 
   it('removes command states the model does not support', async () => {
     const adapter = setup({ '/vehicles?': vehicleOf('XJA1VP') });
-    for (const id of ['hvac-start', 'hvac-temperature', 'charging']) {
+    for (const id of ['climateStart', 'climateStop', 'climateTemperature', 'chargingStart', 'chargingStop']) {
       adapter.objects.set('renault.0.VIN1.remote.' + id, { _id: 'renault.0.VIN1.remote.' + id, type: 'state', common: {}, native: {} });
     }
     await adapter.onReady();
-    expect(adapter.deleted.filter((id) => id.startsWith('VIN1.remote.'))).to.deep.equal([
-      'VIN1.remote.hvac-start',
-      'VIN1.remote.charging',
-      'VIN1.remote.hvac-temperature',
+    expect(deletedRemote(adapter)).to.deep.equal([
+      'VIN1.remote.climateStart',
+      'VIN1.remote.climateStop',
+      'VIN1.remote.chargingStart',
+      'VIN1.remote.chargingStop',
+      'VIN1.remote.climateTemperature',
     ]);
-    expect(common(adapter, 'refresh')).to.not.equal(undefined);
+    expect(common(adapter, 'refreshAll')).to.not.equal(undefined);
   });
 
   it('sends nothing for a write to a removed command state', async () => {
     const adapter = setup();
     await adapter.onReady();
     adapter.requestClient.resetHistory();
-    await adapter.onStateChange('renault.0.VIN1.remote.actions/hvac-start', userWrite(true));
+    for (const id of ['actions/hvac-start', 'hvac-start', 'charging', 'refresh']) {
+      await adapter.onStateChange('renault.0.VIN1.remote.' + id, userWrite(true));
+    }
     expect(adapter.requestClient.called).to.equal(false);
   });
 });
@@ -1674,7 +1734,7 @@ describe('charging on schedule-based vehicles', () => {
       .map((call) => call.args[0])
       .filter((request) => (request.method ?? 'get') === method && request.url.includes(SETTINGS));
   const press = async (adapter) => {
-    const id = 'renault.0.VIN1.remote.charging';
+    const id = 'renault.0.VIN1.remote.chargingStart';
     await adapter.setState(id, true, false);
     await adapter.onStateChange(id, userWrite(true));
   };
@@ -1691,8 +1751,9 @@ describe('charging on schedule-based vehicles', () => {
         { programId: 2, programActivationStatus: false },
       ],
     });
-    expect(adapter.acks['VIN1.remote.charging']).to.equal(true);
-    expect(adapter.states['VIN1.remote.charging']).to.equal(false);
+    expect(adapter.acks['VIN1.remote.chargingStart']).to.equal(true);
+    expect(adapter.states['VIN1.remote.chargingStart']).to.equal(false);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.equal('');
   });
 
   it('does not change the settings it read', async () => {
@@ -1712,8 +1773,8 @@ describe('charging on schedule-based vehicles', () => {
       const adapter = await ready(answer);
       await press(adapter);
       expect(calls(adapter, 'post')).to.deep.equal([]);
-      expect(adapter.states['VIN1.remote.lastError']).to.include('charging');
-      expect(adapter.acks['VIN1.remote.charging']).to.equal(false);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('chargingStart');
+      expect(adapter.acks['VIN1.remote.chargingStart']).to.equal(true);
     });
   }
 });
