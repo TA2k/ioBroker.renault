@@ -13,6 +13,6 @@
     "Login": "Login",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Number of most recent entries kept per charge-history endpoint (0 = unlimited)",
     "Polling": "Polling",
-    "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia and Alpine use different accounts and API keys",
+    "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app": "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app",
     "Update interval in minutes": "Update interval in minutes"
 }

@@ -445,7 +445,7 @@ class Renault extends utils.Adapter {
     this.locale = LOCALES.find((locale) => locale.endsWith('-' + this.country.toUpperCase())) || 'de-DE';
     this.brand = this.config.brand || 'renault';
     this.session = {};
-    //DE API Key (shared by Renault, Dacia and Alpine - same Gigya/Kamereon tenant)
+    // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
     this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
     if (this.brand === 'alpine') {
       this.product = 'MYALPINE';

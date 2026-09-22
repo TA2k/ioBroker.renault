@@ -31,7 +31,7 @@
     "brand": {
       "type": "select",
       "label": "Brand",
-      "help": "Renault/Dacia and Alpine use different accounts and API keys",
+      "help": "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app",
       "default": "renault",
       "options": [
         {

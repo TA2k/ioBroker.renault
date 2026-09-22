@@ -13,6 +13,6 @@
     "Login": "Вхід",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Кількість останніх записів, що зберігаються для кожного ендпоінта історії заряджання (0 = без обмежень)",
     "Polling": "Опитування",
-    "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia та Alpine використовують різні облікові записи та API-ключі",
+    "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app": "Renault / Dacia для застосунку My Renault і My Dacia, Alpine для застосунку My Alpine",
     "Update interval in minutes": "Інтервал оновлення в хвилинах"
 }

@@ -13,6 +13,6 @@
     "Login": "登录",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "每个充电历史接口保留的最新记录条数（0 = 不限制）",
     "Polling": "轮询",
-    "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia 和 Alpine 使用不同的账户和 API 密钥",
+    "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app": "Renault / Dacia 对应 My Renault 和 My Dacia 应用，Alpine 对应 My Alpine 应用",
     "Update interval in minutes": "更新间隔（分钟）"
 }

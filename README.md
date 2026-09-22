@@ -26,7 +26,7 @@ car works with the adapter when it can be controlled in that app.
 
 1. Install the adapter via the ioBroker admin UI.
 2. Open the adapter configuration and enter the credentials of your **My Renault** (or **My Dacia** / **My Alpine**) account: app email and app password.
-3. Select the **brand** matching your app: `Renault / Dacia` or `Alpine` (they use separate accounts and API keys).
+3. Select the **brand** of your app: `Renault / Dacia` for My Renault and My Dacia, `Alpine` for My Alpine. All three apps log in at the same Renault service; the brand decides which account of your login the adapter uses.
 4. Select the **country** of your account in the app.
 5. Optionally set the polling **interval** in minutes and the **API key** (leave empty for auto-detect).
 6. Save and the instance will start polling.
