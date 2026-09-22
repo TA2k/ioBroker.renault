@@ -1777,6 +1777,27 @@ class Renault extends utils.Adapter {
       await this.reportCommandError(vin, name + ' is not supported on this model. Nothing sent');
       return;
     }
+    const pauseMs = this.quotaPausedUntil - Date.now();
+    if (pauseMs > 0) {
+      await this.reportCommandError(
+        vin,
+        name + ': polling pauses for the Renault request quota for ' + Math.ceil(pauseMs / 60000) + ' more minutes. Nothing sent',
+      );
+      return;
+    }
+    const ignoredSince = this.ignoreState[vin]?.[button.path];
+    if (ignoredSince !== undefined && Date.now() - ignoredSince < DAY_MS) {
+      await this.reportCommandError(
+        vin,
+        name +
+          ': the car did not offer ' +
+          button.path +
+          ' at the last request, it is asked again in ' +
+          Math.ceil((ignoredSince + DAY_MS - Date.now()) / HOUR_MS) +
+          ' hours. Nothing sent',
+      );
+      return;
+    }
     if (button.action) {
       const url = this.kamereonUrl(KCA, vin, button.action);
       if (!(await this.sendCommand(vin, name, url, { data: { type: button.type } }, false))) {

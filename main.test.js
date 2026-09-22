@@ -277,8 +277,9 @@ describe('battery refresh', () => {
     const adapter = await started();
     adapter.quotaPausedUntil = Date.now() + 15 * MINUTE;
     await press(adapter);
-    await pending(adapter).fn();
+    expect(pending(adapter)).to.equal(undefined);
     expect(kamereon(adapter)).to.deep.equal([]);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('quota');
   });
 
   it('asks again after a full poll that runs when the refresh is due', async () => {
@@ -2552,6 +2553,35 @@ describe('refresh buttons', () => {
       });
     }
   }
+
+  for (const path of ['refreshLocation', 'askForLocationRefresh']) {
+    it(`${path} sends nothing and says why during the quota pause`, async () => {
+      const adapter = await started();
+      adapter.quotaPausedUntil = Date.now() + 10 * MINUTE;
+      await press(adapter, path);
+      expect(adapter.requestClient.called).to.equal(false);
+      expect(adapter.refreshTimeouts).to.deep.equal({});
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('quota').and.include('10 more minutes');
+      expect(adapter.states['VIN1.remote.' + path]).to.equal(false);
+    });
+
+    it(`${path} sends nothing and says why while the car does not offer the location`, async () => {
+      const adapter = await started();
+      adapter.ignoreState.VIN1.location = Date.now() - HOUR;
+      await press(adapter, path);
+      expect(adapter.requestClient.called).to.equal(false);
+      expect(adapter.refreshTimeouts).to.deep.equal({});
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('location').and.include('23 hours');
+    });
+  }
+
+  it('reads again once the quota pause ended and the ignored day is over', async () => {
+    const adapter = await started();
+    adapter.quotaPausedUntil = Date.now();
+    adapter.ignoreState.VIN1.location = Date.now() - DAY;
+    await press(adapter, 'refreshLocation');
+    expect(pending(adapter, 'location').ms).to.equal(0);
+  });
 
   it('keeps three minutes between two reads of the location, asked or not', async () => {
     const adapter = await started();
