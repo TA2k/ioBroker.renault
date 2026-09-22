@@ -1608,10 +1608,6 @@ class Renault extends utils.Adapter {
       }
       return;
     }
-    if (!this.account) {
-      this.log.error('No account found');
-      return;
-    }
     if (this.loginRejected) {
       // a command would end in a login attempt with the rejected credentials
       await this.reportCommandError(
