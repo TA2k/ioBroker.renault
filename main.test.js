@@ -748,6 +748,42 @@ describe('request quota', () => {
     expect(pauses(adapter).map((line) => line.match(/(\d+) minutes/)?.[1])).to.deep.equal(['15', '30', '60', '60', '15']);
   });
 
+  for (const [name, error] of [
+    ['a 429', httpError(429, {}, {})],
+    ['a quota error body', httpError(500, {}, QUOTA)],
+  ]) {
+    it(`pauses polling when a command gets ${name}`, async () => {
+      const now = useClock();
+      const adapter = setup({ '/actions/hvac-start': error });
+      await adapter.onReady();
+      await adapter.onStateChange('renault.0.VIN1.remote.climateStart', userWrite(true));
+      expect(adapter.quotaPausedUntil).to.equal(now.now + 15 * 60 * 1000);
+      expect(pauses(adapter)).to.have.length(1);
+      expect(adapter.states['VIN1.remote.lastCommandError']).to.include('quota');
+    });
+  }
+
+  it('does not pause polling for a command that fails otherwise', async () => {
+    useClock();
+    const adapter = setup({ '/actions/hvac-start': httpError(500) });
+    await adapter.onReady();
+    await adapter.onStateChange('renault.0.VIN1.remote.climateStart', userWrite(true));
+    expect(adapter.quotaPausedUntil).to.equal(0);
+  });
+
+  it('keeps the pause growing when only a single read succeeds between two quota errors', async () => {
+    const now = useClock();
+    let overloaded = true;
+    const adapter = setup({ '/battery-status': () => (overloaded ? httpError(429, {}, QUOTA) : {}) });
+    await adapter.onReady();
+    now.tick(DAY);
+    overloaded = false;
+    await adapter.updateDevices(false, { vin: 'VIN1', path: 'battery-status' });
+    overloaded = true;
+    await adapter.updateDevices();
+    expect(pauses(adapter).map((line) => line.match(/(\d+) minutes/)?.[1])).to.deep.equal(['15', '30']);
+  });
+
   it('does not ignore the endpoint after a 429', async () => {
     const now = useClock();
     const adapter = setup({ '/battery-status': httpError(429, {}, QUOTA) });
@@ -1944,6 +1980,15 @@ describe('charging on schedule-based vehicles', () => {
     await adapter.setState(id, true, false);
     await adapter.onStateChange(id, userWrite(true));
   };
+
+  it('pauses polling and posts nothing when reading the settings gets a 429', async () => {
+    useClock();
+    const adapter = await ready(httpError(429, {}, {}));
+    await press(adapter);
+    expect(calls(adapter, 'post')).to.deep.equal([]);
+    expect(adapter.quotaPausedUntil).to.be.greaterThan(Date.now());
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('quota');
+  });
 
   it('posts the settings back with every program switched off', async () => {
     const adapter = await ready(CURRENT);

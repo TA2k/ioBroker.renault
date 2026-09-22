@@ -295,6 +295,15 @@ function isPlaceholder(body) {
 }
 
 /**
+ * Renault's answer when the request quota of the account is used up, usually with status 429.
+ *
+ * @param {any} error
+ */
+function isQuotaError(error) {
+  return error?.response?.status === 429 || JSON.stringify(error?.response?.data ?? '').includes('err.func.wired.overloaded');
+}
+
+/**
  * No source (renault-api, Home Assistant, ZoePHP) documents a range; like Home Assistant, only a
  * positive number is required and the cloud rejects the rest.
  *
@@ -1145,10 +1154,10 @@ class Renault extends utils.Adapter {
         }
       }
     }
-    this.quotaStrikes = 0;
     if (only) {
       return;
     }
+    this.quotaStrikes = 0;
     if (hourlyDue) {
       this.lastHourlyPoll = now;
     }
@@ -1438,7 +1447,7 @@ class Renault extends utils.Adapter {
    */
   handlePollError(vin, element, error) {
     const status = error.response?.status;
-    if (status === 429 || JSON.stringify(error.response?.data ?? '').includes('err.func.wired.overloaded')) {
+    if (isQuotaError(error)) {
       return 'quota';
     }
     if (status === 401) {
@@ -1726,7 +1735,14 @@ class Renault extends utils.Adapter {
     try {
       settings = (await this.requestClient({ method: 'get', url, headers: this.commandHeaders() })).data;
     } catch (error) {
-      await this.reportCommandError(vin, name + ' failed, reading the charge settings failed: ' + error.message);
+      const quota = isQuotaError(error);
+      await this.reportCommandError(
+        vin,
+        name + ' failed, reading the charge settings failed: ' + (quota ? 'the Renault request quota is used up' : error.message),
+      );
+      if (quota) {
+        this.pauseForQuota();
+      }
       return;
     }
     if (!settings || typeof settings !== 'object' || !Array.isArray(settings.programs)) {
@@ -1890,10 +1906,15 @@ class Renault extends utils.Adapter {
       accepted = true;
     } catch (error) {
       const code = error.response?.data?.errors?.[0]?.errorCode;
-      const message = 'Command ' + name + ' failed: ' + error.message + (code ? ' (' + code + ')' : '');
+      const quota = isQuotaError(error);
+      const reason = quota ? 'the Renault request quota is used up' : error.message;
+      const message = 'Command ' + name + ' failed: ' + reason + (code ? ' (' + code + ')' : '');
       this.log.error(message + ' for ' + vin);
       error.response && this.log.debug(JSON.stringify(error.response.data));
       await this.setState(vin + '.remote.lastCommandError', message, true);
+      if (quota) {
+        this.pauseForQuota();
+      }
     }
     if (pollAfter) {
       this.schedulePoll(20 * 1000);

@@ -198,7 +198,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) the vehicle is named after its model without doubling it (`ZOE` instead of `ZOEZOE`); a name given by the user is kept
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
 - (typhosj) fewer requests against Renault's quota of about 60 per hour: slow-changing data such as the charge history is fetched once per hour, and the adapter warns once when its settings need more requests than the quota allows
-- (typhosj) when the request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint
+- (typhosj) when the request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint; a command that meets the quota error starts the pause too
 - (typhosj) an expired token during a poll is refreshed and the poll repeated once; after a failed token refresh the adapter logs in again with growing delay; only wrong credentials stop the login, a temporary error of the account service is retried
 - (typhosj) an endpoint the car rejected is asked again once a day instead of never until restart; an answer without data counts as not supported; an endpoint with server errors for 24 hours is asked only hourly, and its server error is logged once as warning
 - (typhosj) login and requests use the country from the settings instead of always Germany
