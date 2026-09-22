@@ -230,10 +230,6 @@ above; the adapter does not create it, and removes it if an older version had cr
 
 - (TA2k) update dependencies, migrate to ESLint 10, fix repochecker findings
 
-### 0.0.7
-
-- (TA2k) initial release
-
 [Older changelogs can be found here](CHANGELOG_OLD.md)
 
 ## License
