@@ -473,6 +473,9 @@ class Renault extends utils.Adapter {
       await this.migrateChargeHistoryV1();
       await this.loadCockpitChoice();
       await this.runPoll();
+      // a relogin planned during that poll comes back here and would otherwise start a second pair
+      this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
+      this.vehicleListInterval && this.clearInterval(this.vehicleListInterval);
       this.refreshTokenInterval = this.setInterval(() => {
         this.refreshToken();
       }, 3500 * 1000);

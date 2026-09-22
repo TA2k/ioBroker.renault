@@ -870,6 +870,22 @@ describe('relogin', () => {
     expect(adapter.states['info.connection']).to.equal(true);
   });
 
+  it('leaves one refresh and one vehicle list interval when the first poll already needs a relogin', async () => {
+    let tokens = 0;
+    // the login gets a token, the refresh after the 401 of the first poll does not
+    const adapter = setup({
+      'accounts.getJWT': () => (++tokens === 1 ? { id_token: 'ID_TOKEN' } : httpError(500)),
+      '/battery-status': httpError(401),
+    });
+    await adapter.onReady();
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(60 * 1000);
+    adapter.requestClient = setup().requestClient;
+    await adapter.timeouts.at(-1)?.fn();
+    const live = (ms) => adapter.intervals.filter((timer) => timer.ms === ms && !adapter.clearInterval.calledWith(timer));
+    expect(live(3500 * 1000)).to.have.length(1);
+    expect(live(DAY)).to.have.length(1);
+  });
+
   it('starts the backoff at 5 minutes again after a successful relogin', async () => {
     const adapter = setup({ '/vehicles?': httpError(503) });
     await adapter.onReady();
