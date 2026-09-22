@@ -186,16 +186,16 @@ above; the adapter does not create it, and removes it if an older version had cr
 
 - (typhosj) **Breaking change:** the remote states are renamed and every command is a button. `actions/hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature` (default 21 °C, a valid old value is taken over), `actions/charging-start`, `charge/pause-resume` and `charge/start` become `chargingStart` and `chargingStop`, and `refresh` becomes `refreshAll`. The old states are removed on the first start. Adjust scripts and visualizations
 - (typhosj) **Breaking change:** only one cockpit version is polled per vehicle (v2 if it answers, else v1; v1 fills in while v2 answers with server errors), and its data is always written to `cockpit`; the `cockpitv2` channel is removed
-- (typhosj) **Breaking change:** battery, range, mileage, fuel and temperature states get units and specific roles, and data states are read-only
+- (typhosj) **Breaking change:** battery, range, mileage, fuel and temperature states get units and specific roles
 - (typhosj) `battery-status.plugStatus` and `battery-status.chargingStatus` name their codes, for example `1` plugged or `0.3` waiting for current charge
 - (typhosj) **Breaking change:** the update interval is at least 5 minutes (15 minutes for new installations)
 - (typhosj) commands and polled data follow the endpoint table of renault-api per model: each command sends the request the model needs, and commands or data the model does not offer are neither created nor polled
-- (typhosj) commands are confirmed with ack once the Renault cloud accepted them, and `remote.lastCommandError` holds the error of the last command
+- (typhosj) a command button is reset with ack after the command, charge mode and charge limits are confirmed with ack once the Renault cloud accepted them, and `remote.lastCommandError` holds the error of the last command
 - (typhosj) `chargingStart` starts charging on the Renault 4, Renault 5, Alpine A290, Scenic E-Tech and Master E-Tech by switching off their charge programs, as the app does
 - (typhosj) read and set the minimum and target charge level with `remote.chargeLimitMin` and `remote.chargeLimitTarget` on models that support it; the current limits are in the new channel `soc-levels`
 - (typhosj) set the charge mode with `remote.chargeMode`; it and the charge limit states show the values the car reports
 - (typhosj) new buttons `remote.hornStart` and `remote.lightsStart` on models that support them; `remote.refreshLocation`, `remote.refreshBattery` and `remote.refreshClimate` read only the location, the battery status or the climate control status from the cloud, and `remote.askForLocationRefresh` first asks the car to upload its position and reads it 30 seconds later; during a quota pause, or while the car does not offer the data, these buttons send nothing and say why in `lastCommandError`
-- (typhosj) new channels `pressure` (tyre pressure in mbar) and `alerts` (Renault 5), read once per hour; a cleared alert is removed, the other alert states keep their history settings
+- (typhosj) new channels `pressure` (tyre pressure in mbar) and `alerts` (Renault 5), read once per hour; a cleared alert is removed
 - (typhosj) the vehicle is named after its model without doubling it (`ZOE` instead of `ZOEZOE`); a name given by the user is kept
 - (typhosj) the vehicle list and details are loaded again every 24 hours, new vehicles are picked up, and the details channel is named "Vehicle details"
 - (typhosj) fewer requests against Renault's quota of about 60 per hour: slow-changing data such as the charge history is fetched once per hour, and the adapter warns once when its settings need more requests than the quota allows
@@ -205,6 +205,9 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) login and requests use the country from the settings instead of always Germany; the settings offer the countries of the My Renault app as a list
 - (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning, and the link to the current key in the settings points to renault-api, where the lookup reads it
 - (typhosj) polls no longer overlap, requests time out after 30 seconds, no timer survives a stop of the instance, and the adapter only listens to its remote states
+- (typhosj) the log no longer contains the vehicle list, the position of the car or the whole answer to a failed login
+- (typhosj) a vehicle whose VIN contains characters other than letters and digits is skipped with a warning
+- (typhosj) an invalid number of charge history entries or an unknown brand in the settings is replaced by the default with a warning; more than 1000 entries are capped at 1000
 - (typhosj) the adapter icon and readme links point to the `main` branch again
 - (typhosj) lint uses the shared `@iobroker/eslint-config`; dependencies updated
 

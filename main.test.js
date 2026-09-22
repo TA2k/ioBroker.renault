@@ -2806,3 +2806,194 @@ describe('vehicle name', () => {
     expect(await named({ modelSCR: 'ZOE', model: { label: 'ZOE' } }, 'RENAULT', 'My car')).to.equal('My car');
   });
 });
+
+describe('startup failures', () => {
+  it('keeps token refresh and vehicle reload when the first poll throws', async () => {
+    const adapter = setup();
+    adapter.json2iob.parse = sinon.spy(async (prefix) => {
+      if (!prefix.endsWith('.general')) {
+        throw new Error('boom');
+      }
+    });
+    await adapter.onReady();
+    expect(adapter.intervals.map((timer) => timer.ms)).to.deep.equal([3500 * 1000, DAY]);
+    expect(adapter.timeouts.map((timer) => timer.ms)).to.deep.equal([adapter.config.interval * 60 * 1000]);
+    expect(logged(adapter.log.error)).to.include('Poll failed: Error: boom');
+  });
+
+  it('logs a failed startup instead of rejecting', async () => {
+    const adapter = setup();
+    adapter.loadCockpitChoice = sinon.stub().rejects(new Error('database gone'));
+    await adapter.onReady();
+    expect(logged(adapter.log.error)).to.include('Startup failed: Error: database gone');
+  });
+
+  for (const [username, password] of [
+    ['', 'secret'],
+    ['   ', 'secret'],
+    ['user@example.com', ''],
+    [undefined, undefined],
+    [null, null],
+  ]) {
+    it(`sends nothing and plans no retry for username ${JSON.stringify(username)} and password ${JSON.stringify(password)}`, async () => {
+      const adapter = setup();
+      adapter.config.username = /** @type {any} */ (username);
+      adapter.config.password = /** @type {any} */ (password);
+      await adapter.onReady();
+      expect(adapter.requestClient.called).to.equal(false);
+      expect(adapter.timeouts).to.have.length(0);
+      expect(adapter.intervals).to.have.length(0);
+      expect(adapter.states['info.connection']).to.equal(false);
+      expect(logged(adapter.log.error).some((line) => line.includes('Email or password is missing'))).to.equal(true);
+    });
+  }
+});
+
+describe('charge history limit', () => {
+  const cases = [
+    [100, 100],
+    [0, 0],
+    [1, 1],
+    [1000, 1000],
+    [1001, 1000],
+    [12.7, 12],
+    ['50', 50],
+    [-1, 100],
+    ['', 100],
+    [null, 100],
+    ['abc', 100],
+    [Infinity, 100],
+  ];
+  for (const [configured, expected] of cases) {
+    it(`keeps ${expected} entries for a configured ${JSON.stringify(configured)}`, async () => {
+      const adapter = setup();
+      adapter.config.chargeHistoryLimit = /** @type {any} */ (configured);
+      await adapter.onReady();
+      expect(adapter.config.chargeHistoryLimit).to.equal(expected);
+      expect(logged(adapter.log.warn).some((line) => line.startsWith('Charge history entries'))).to.equal(expected !== Number(configured));
+    });
+  }
+
+  /** @type {[number, string[]][]} */
+  const kept = [
+    [2, ['2', '3']],
+    [0, ['1', '2', '3']],
+  ];
+  for (const [limit, days] of kept) {
+    it(`writes the entries ${days.join(', ')} with a configured limit of ${limit}`, async () => {
+      const adapter = setup({
+        '/charge-history?': { data: { attributes: { chargeSummaries: [{ day: '1' }, { day: '2' }, { day: '3' }] } } },
+      });
+      adapter.config.chargeHistoryLimit = limit;
+      await adapter.onReady();
+      const call = adapter.json2iob.parse.getCalls().find((entry) => entry.args[0] === 'VIN1.charge-history');
+      expect(call?.args[1].chargeSummaries.map((entry) => entry.day)).to.deep.equal(days);
+    });
+  }
+});
+
+describe('brand', () => {
+  for (const [configured, brand, product, warned] of [
+    ['renault', 'renault', 'MYRENAULT', false],
+    ['alpine', 'alpine', 'MYALPINE', false],
+    ['', 'renault', 'MYRENAULT', false],
+    [undefined, 'renault', 'MYRENAULT', false],
+    ['bmw', 'renault', 'MYRENAULT', true],
+    ['Alpine', 'renault', 'MYRENAULT', true],
+  ]) {
+    it(`uses ${brand} for a configured ${JSON.stringify(configured)}`, async () => {
+      const adapter = setup();
+      adapter.config.brand = /** @type {any} */ (configured);
+      await adapter.onReady();
+      expect(adapter.brand).to.equal(brand);
+      expect(adapter.product).to.equal(product);
+      expect(adapter.buildTraceId().startsWith('build=' + brand + '-android-')).to.equal(true);
+      expect(logged(adapter.log.warn).some((line) => line.includes('is unknown, using renault'))).to.equal(warned);
+    });
+  }
+});
+
+describe('personal data in the log', () => {
+  /** @param {any} adapter */
+  const allLines = (adapter) =>
+    Object.values(adapter.log).flatMap((spy) => spy.getCalls().map((call) => require('node:util').inspect(call.args[0])));
+
+  it('logs neither the position nor the vehicle list', async () => {
+    const adapter = setup({
+      '/location?': require('./test/fixtures/renault-api/location.1.json'),
+      '/vehicles?': { vehicleLinks: [{ ...VEHICLE, vehicleDetails: { ...VEHICLE.vehicleDetails, registrationNumber: 'AB-CD-123' } }] },
+    });
+    await adapter.onReady();
+    const lines = allLines(adapter);
+    for (const secret of ['48.1234567', '11.1234567', 'AB-CD-123']) {
+      expect(lines.filter((line) => line.includes(secret))).to.deep.equal([]);
+    }
+    expect(lines.some((line) => line.includes('location of VIN1: position not logged'))).to.equal(true);
+  });
+
+  it('logs only code and message of a failed login', async () => {
+    const adapter = setup({
+      'accounts.login': { errorCode: 206001, errorMessage: 'Account Pending Registration', UID: 'UID-123', regToken: 'REG-TOKEN' },
+    });
+    await adapter.onReady();
+    const lines = allLines(adapter);
+    expect(lines.filter((line) => line.includes('UID-123') || line.includes('REG-TOKEN'))).to.deep.equal([]);
+    expect(logged(adapter.log.error)).to.include('Login failed: 206001 Account Pending Registration');
+  });
+});
+
+describe('VIN check', () => {
+  it('skips vehicles whose VIN would break object ids or URLs', async () => {
+    const adapter = setup({
+      '/vehicles?': { vehicleLinks: [VEHICLE, { vin: 'A.B' }, { vin: 'X/../Y' }, { vin: 'A B' }, { vin: '' }, { vin: 5 }, {}, null] },
+    });
+    await adapter.onReady();
+    expect(adapter.deviceArray).to.deep.equal(['VIN1']);
+    expect([...adapter.objects.values()].filter((object) => object.type === 'device').map((object) => object._id)).to.deep.equal([
+      'renault.0.VIN1',
+    ]);
+    expect(urls(adapter).filter((url) => url.includes('/cars/') && !url.includes('/cars/VIN1/'))).to.deep.equal([]);
+    expect(logged(adapter.log.warn).filter((line) => line.startsWith('Skipped a vehicle'))).to.have.length(7);
+  });
+});
+
+describe('after unload', () => {
+  it('plans no poll, refresh or relogin', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.onUnload(() => {});
+    const timeouts = adapter.timeouts.length;
+    adapter.schedulePoll(1000);
+    adapter.scheduleRefresh('VIN1', 'location', 0);
+    adapter.reconnect(0);
+    await adapter.sendCommand('VIN1', 'climateStart', 'https://example.invalid', {});
+    expect(adapter.timeouts).to.have.length(timeouts);
+  });
+
+  it('starts no timer when the instance stops during a successful login', async () => {
+    /** @type {any} */
+    let adapter = undefined;
+    adapter = setup({
+      'accounts.login': () => {
+        adapter.onUnload(() => {});
+        return { sessionInfo: { cookieValue: 'COOKIE' } };
+      },
+    });
+    await adapter.onReady();
+    expect(adapter.timeouts).to.have.length(0);
+    expect(adapter.intervals).to.have.length(0);
+  });
+
+  it('plans no retry when the instance stops during a failed login', async () => {
+    /** @type {any} */
+    let adapter = undefined;
+    adapter = setup({
+      'accounts.login': () => {
+        adapter.onUnload(() => {});
+        return new Error('ECONNRESET');
+      },
+    });
+    await adapter.onReady();
+    expect(adapter.timeouts).to.have.length(0);
+  });
+});

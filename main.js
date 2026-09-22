@@ -13,6 +13,10 @@ const Json2iob = require('json2iob');
 
 const MIN_INTERVAL_MINUTES = 5;
 const MAX_INTERVAL_MINUTES = 1440;
+const DEFAULT_HISTORY_ENTRIES = 100;
+const MAX_HISTORY_ENTRIES = 1000;
+/** A VIN is used in object ids and URLs, so only letters and digits pass. */
+const VALID_VIN = /^[A-Za-z0-9]+$/;
 /** Locales of the My Renault app as listed in renault-api const.py; the first match per country wins. */
 const LOCALES = [
   'bg-BG',
@@ -392,6 +396,8 @@ class Renault extends utils.Adapter {
     this.lastRefresh = {};
     /** @type {Set<Promise<void>>} single-endpoint reads in flight; a full poll waits for them */
     this.refreshes = new Set();
+    /** Set by onUnload; nothing schedules a timer after it. */
+    this.unloading = false;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -411,7 +417,7 @@ class Renault extends utils.Adapter {
    */
   async onReady() {
     // Reset the connection indicator during startup
-    this.setState('info.connection', false, true);
+    await this.setState('info.connection', false, true);
     const interval = Number(this.config.interval);
     const bounded = Number.isFinite(interval)
       ? Math.min(Math.max(interval, MIN_INTERVAL_MINUTES), MAX_INTERVAL_MINUTES)
@@ -429,6 +435,22 @@ class Renault extends utils.Adapter {
       );
     }
     this.config.interval = bounded;
+    // a hand-edited or old config can hold a string or null
+    const rawLimit = /** @type {unknown} */ (this.config.chargeHistoryLimit);
+    const limit = typeof rawLimit === 'number' || (typeof rawLimit === 'string' && rawLimit.trim() !== '') ? Number(rawLimit) : NaN;
+    const historyEntries =
+      Number.isFinite(limit) && limit >= 0 ? Math.min(Math.floor(limit), MAX_HISTORY_ENTRIES) : DEFAULT_HISTORY_ENTRIES;
+    if (historyEntries !== limit) {
+      this.log.warn(
+        'Charge history entries ' +
+          JSON.stringify(rawLimit) +
+          ' is not a number from 0 to ' +
+          MAX_HISTORY_ENTRIES +
+          ', using ' +
+          historyEntries,
+      );
+    }
+    this.config.chargeHistoryLimit = historyEntries;
     /** @type {ioBroker.Timeout | undefined | null} */
     this.reLoginTimeout = null;
     const country = String(this.config.country ?? '')
@@ -443,7 +465,10 @@ class Renault extends utils.Adapter {
       this.country = 'de';
     }
     this.locale = LOCALES.find((locale) => locale.endsWith('-' + this.country.toUpperCase())) || 'de-DE';
-    this.brand = this.config.brand || 'renault';
+    if (this.config.brand && this.config.brand !== 'renault' && this.config.brand !== 'alpine') {
+      this.log.warn('Brand ' + JSON.stringify(this.config.brand) + ' is unknown, using renault');
+    }
+    this.brand = this.config.brand === 'alpine' ? 'alpine' : 'renault';
     this.session = {};
     // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
     this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
@@ -454,11 +479,15 @@ class Renault extends utils.Adapter {
       this.product = 'MYRENAULT';
       this.accountTypes = ['MYRENAULT', 'MYDACIA'];
     }
+    if (!String(this.config.username ?? '').trim() || !this.config.password) {
+      this.log.error('Email or password is missing. Enter both in the adapter settings; the adapter does nothing until then.');
+      return;
+    }
     this.apiKeyUpdate = await this.resolveKamereonKey();
 
     this.subscribeStates('*.remote.*');
 
-    await this.connectAndPoll();
+    await this.connectAndPoll().catch((error) => this.log.error('Startup failed: ' + error));
   }
 
   /**
@@ -501,7 +530,11 @@ class Renault extends utils.Adapter {
       this.startAttempt = 0;
       await this.migrateChargeHistoryV1();
       await this.loadCockpitChoice();
-      await this.runPoll();
+      // a failed first poll must not skip the intervals below; the next poll is already scheduled
+      await this.runPoll().catch((error) => this.log.error('Poll failed: ' + error));
+      if (this.unloading) {
+        return;
+      }
       // a relogin planned during that poll comes back here and would otherwise start a second pair
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       this.vehicleListInterval && this.clearInterval(this.vehicleListInterval);
@@ -514,6 +547,9 @@ class Renault extends utils.Adapter {
     }
     if (this.loginRejected) {
       this.log.error('Login rejected. Check email and password in the adapter settings, then restart the instance.');
+      return;
+    }
+    if (this.unloading) {
       return;
     }
     const delayMinutes = Math.min(5 * 2 ** this.startAttempt, 60);
@@ -545,6 +581,9 @@ class Renault extends utils.Adapter {
    * @param {number} delayMs
    */
   schedulePoll(delayMs) {
+    if (this.unloading) {
+      return;
+    }
     this.pollTimeout && this.clearTimeout(this.pollTimeout);
     this.pollTimeout = this.setTimeout(() => this.runPoll().catch((error) => this.log.error('Poll failed: ' + error)), delayMs);
   }
@@ -558,6 +597,9 @@ class Renault extends utils.Adapter {
    * @param {number} delayMs
    */
   scheduleRefresh(vin, path, delayMs) {
+    if (this.unloading) {
+      return;
+    }
     const key = vin + ' ' + path;
     this.refreshTimeouts[key] && this.clearTimeout(this.refreshTimeouts[key]);
     const due = Math.max(Date.now() + delayMs, (this.lastRefresh[key] ?? -Infinity) + REFRESH_GAP_MS);
@@ -601,7 +643,7 @@ class Renault extends utils.Adapter {
    */
   async login() {
     const ok = await this.loginSteps();
-    this.setState('info.connection', ok, true);
+    await this.setState('info.connection', ok, true);
     return ok;
   }
 
@@ -627,7 +669,8 @@ class Renault extends utils.Adapter {
       .then((res) => {
         if (res.data.errorMessage) {
           this.loginRejected = LOGIN_REJECTED_CODES.includes(Number(res.data.errorCode));
-          this.log.error(JSON.stringify(res.data));
+          // only code and message: other fields of the answer can carry the account id
+          this.log.error('Login failed: ' + res.data.errorCode + ' ' + res.data.errorMessage);
           return;
         }
         return res.data.sessionInfo;
@@ -747,10 +790,15 @@ class Renault extends utils.Adapter {
       },
     })
       .then(async (res) => {
-        this.log.debug(JSON.stringify(res.data));
+        // the list itself is not logged, it holds VINs and registration numbers
+        this.log.debug('Vehicle list: ' + res.data.vehicleLinks.length + ' vehicles');
 
         const vins = [];
         for (const device of res.data.vehicleLinks) {
+          if (typeof device?.vin !== 'string' || !VALID_VIN.test(device.vin)) {
+            this.log.warn('Skipped a vehicle whose VIN has characters other than letters and digits');
+            continue;
+          }
           vins.push(device.vin);
           if (this.deviceArray.length && !this.deviceArray.includes(device.vin)) {
             this.log.info('New vehicle ' + device.vin + ' found, polling it from now on');
@@ -1361,7 +1409,8 @@ class Renault extends utils.Adapter {
       delete this.ignoreState[vin][element.path];
       this.log.info(element.path + ' answers again for ' + vin + ', polling it again');
     }
-    this.log.debug(JSON.stringify(res.data));
+    // the position is personal data and stays out of the log
+    this.log.debug(element.path + ' of ' + vin + ': ' + (element.path === 'location' ? 'position not logged' : JSON.stringify(res.data)));
     if (!res.data) {
       return 'ok';
     }
@@ -1377,8 +1426,8 @@ class Renault extends utils.Adapter {
     if (element.isHistory) {
       forceIndex = true;
       const arrayKey = element.path === 'charge-history' ? 'chargeSummaries' : 'charges';
-      const limit = Number(this.config.chargeHistoryLimit);
-      const cap = Number.isFinite(limit) && limit > 0 ? limit : 0;
+      // validated in onReady; 0 keeps every entry of the one-year range
+      const cap = this.config.chargeHistoryLimit;
       if (cap > 0 && data && Array.isArray(data[arrayKey]) && data[arrayKey].length > cap) {
         data = { ...data, [arrayKey]: data[arrayKey].slice(-cap) };
       }
@@ -1567,10 +1616,10 @@ class Renault extends utils.Adapter {
         throw new Error('no id token in the answer' + (res.data?.errorCode ? ' (error ' + res.data.errorCode + ')' : ''));
       }
       this.session = res.data;
-      this.setState('info.connection', true, true);
+      await this.setState('info.connection', true, true);
       return true;
     } catch (error) {
-      this.setState('info.connection', false, true);
+      await this.setState('info.connection', false, true);
       this.log.error('Token refresh failed: ' + error + '. Logging in again in 1 minute');
       error.response && this.log.error(JSON.stringify(error.response.data));
       this.reconnect(60 * 1000);
@@ -1585,6 +1634,9 @@ class Renault extends utils.Adapter {
    * @param {number} delayMs
    */
   reconnect(delayMs) {
+    if (this.unloading) {
+      return;
+    }
     this.pollTimeout && this.clearTimeout(this.pollTimeout);
     this.pollTimeout = null;
     this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
@@ -1604,7 +1656,8 @@ class Renault extends utils.Adapter {
    */
   onUnload(callback) {
     try {
-      this.setState('info.connection', false, true);
+      this.unloading = true;
+      this.setState('info.connection', false, true).catch(() => {});
       this.pollTimeout && this.clearTimeout(this.pollTimeout);
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
       Object.values(this.refreshTimeouts).forEach((timer) => timer && this.clearTimeout(timer));
