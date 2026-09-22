@@ -187,6 +187,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) **Breaking change:** the remote states are renamed and every command is a button. `actions/hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature` (default 21 °C, a valid old value is taken over), `actions/charging-start`, `charge/pause-resume` and `charge/start` become `chargingStart` and `chargingStop`, and `refresh` becomes `refreshAll`. The old states are removed on the first start. Adjust scripts and visualizations
 - (typhosj) **Breaking change:** only one cockpit version is polled per vehicle (v2 if it answers, else v1; v1 fills in while v2 answers with server errors), and its data is always written to `cockpit`; the `cockpitv2` channel is removed
 - (typhosj) **Breaking change:** battery, range, mileage, fuel and temperature states get units and specific roles, and data states are read-only
+- (typhosj) `battery-status.plugStatus` and `battery-status.chargingStatus` name their codes, for example `1` plugged or `0.3` waiting for current charge
 - (typhosj) **Breaking change:** the update interval is at least 5 minutes (15 minutes for new installations)
 - (typhosj) commands and polled data follow the endpoint table of renault-api per model: each command sends the request the model needs, and commands or data the model does not offer are neither created nor polled
 - (typhosj) commands are confirmed with ack once the Renault cloud accepted them, and `remote.lastCommandError` holds the error of the last command

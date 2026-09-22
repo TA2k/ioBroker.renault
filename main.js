@@ -138,6 +138,26 @@ const DATA_ROLES = {
   rrPressure: 'value.pressure',
 };
 
+/** Meaning of the status codes of battery-status, from renault-api kamereon/enums.py (ChargeState, PlugState). */
+const DATA_STATES = {
+  plugStatus: { 0: 'unplugged', 1: 'plugged', '-1': 'plug error', '-2147483648': 'unknown' },
+  chargingStatus: {
+    0: 'not charging',
+    0.1: 'waiting for a planned charge',
+    0.2: 'charge ended',
+    0.3: 'waiting for current charge',
+    0.4: 'energy flap opened',
+    1: 'charging',
+    // not charging on the Zoe up to ZE40, a charge error from ZE50 on
+    '-1': 'not charging or charge error',
+    '-1.1': 'unavailable',
+    '-1.3': 'V2G charging waiting',
+    '-1.4': 'V2L connected',
+    '-1.5': 'V2G discharging',
+    '-1.6': 'V2G charging',
+  },
+};
+
 /** Charge limit states and the soc-levels keys they set; ranges as in Home Assistant's Renault number entities. */
 const CHARGE_LIMITS = {
   chargeLimitMin: { key: 'socMin', other: 'socTarget', min: 15, max: 45 },
@@ -1376,6 +1396,8 @@ class Renault extends utils.Adapter {
       channelName: element.desc,
       units: DATA_UNITS,
       roles: DATA_ROLES,
+      // json2iob adds an unknown value to the states it gets, so each parse gets its own copy
+      states: structuredClone(DATA_STATES),
       write: false,
     });
     if (element.replace) {

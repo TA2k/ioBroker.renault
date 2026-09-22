@@ -1805,6 +1805,31 @@ describe('vehicle data objects', () => {
     expect(common('charges.charges01.chargeStartBatteryLevel')).to.include({ type: 'number', unit: '%' });
   });
 
+  it('names the plug and charging status codes', async () => {
+    const common = await withObjects();
+    expect(common('battery-status.plugStatus').states).to.include({ 0: 'unplugged', 1: 'plugged', '-2147483648': 'unknown' });
+    expect(common('battery-status.chargingStatus').states).to.include({
+      0: 'not charging',
+      0.1: 'waiting for a planned charge',
+      1: 'charging',
+      '-1.1': 'unavailable',
+    });
+  });
+
+  it('keeps an unknown status code of one vehicle out of the states of the next', async () => {
+    useClock();
+    const adapter = setup({
+      '/vehicles?': { vehicleLinks: [{ vin: 'VIN1' }, { vin: 'VIN2' }] },
+      '/cars/VIN1/battery-status?': { data: { attributes: { chargingStatus: 0.7 } } },
+      '/cars/VIN2/battery-status?': { data: { attributes: { chargingStatus: 1 } } },
+    });
+    adapter.json2iob = /** @type {any} */ (new Json2iob(adapter));
+    await adapter.onReady();
+    const states = (vin) => adapter.objects.get('renault.0.' + vin + '.battery-status.chargingStatus')?.common.states;
+    expect(states('VIN1')).to.include({ 0.7: 0.7 });
+    expect(states('VIN2')).to.not.have.property('0.7');
+  });
+
   // The fixtures contain no chargingInstantaneousPower, so this test builds its own answer.
   it('gives no unit to the charging power, whose unit differs by model', async () => {
     useClock();
