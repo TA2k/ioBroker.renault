@@ -104,25 +104,25 @@
       "fr": "Renault",
       "it": "Renault",
       "es": "Renault",
-      "pl": "Renault ",
+      "pl": "Renault",
       "uk": "Рено",
-      "zh-cn": "雷诺和佐伊"
+      "zh-cn": "雷诺"
     },
     "desc": {
-      "en": "Adapter for Renault cars for example Zoe",
-      "de": "Adapter für Renault Autos zum Beispiel Zoe",
-      "ru": "Адаптер для автомобилей Renault на примере Zoe",
-      "pt": "Adaptador para carros Renault, por exemplo Zoe",
-      "nl": "Adapter voor Renault auto's bijvoorbeeld Zoe",
-      "fr": "Adaptateur pour voitures Renault par exemple Zoe",
-      "it": "Adattatore per auto Renault ad esempio Zoe",
-      "es": "Adaptador para automóviles Renault, por ejemplo Zoe",
-      "pl": "Adapter do samochodów Renault np. Zoe",
-      "uk": "Адаптер для автомобілів Renault, наприклад Zoe",
-      "zh-cn": "雷诺汽车的适配器，例如 Zoe"
+      "en": "Adapter for Renault, Dacia and Alpine cars",
+      "de": "Adapter für Autos von Renault, Dacia und Alpine",
+      "ru": "Адаптер для автомобилей Renault, Dacia и Alpine",
+      "pt": "Adaptador para carros Renault, Dacia e Alpine",
+      "nl": "Adapter voor auto's van Renault, Dacia en Alpine",
+      "fr": "Adaptateur pour voitures Renault, Dacia et Alpine",
+      "it": "Adattatore per auto Renault, Dacia e Alpine",
+      "es": "Adaptador para automóviles Renault, Dacia y Alpine",
+      "pl": "Adapter do samochodów Renault, Dacia i Alpine",
+      "uk": "Адаптер для автомобілів Renault, Dacia та Alpine",
+      "zh-cn": "适用于雷诺、达契亚和 Alpine 汽车的适配器"
     },
     "authors": ["TA2k <tombox2020@gmail.com>"],
-    "keywords": ["renault", "Renault", "dacia", "Dacia", "zoe", "kangoo"],
+    "keywords": ["renault", "Renault", "dacia", "Dacia", "alpine", "Alpine", "zoe", "kangoo"],
     "licenseInformation": {
       "type": "free",
       "license": "MIT"
