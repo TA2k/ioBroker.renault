@@ -203,7 +203,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) an expired token during a poll is refreshed and the poll repeated once; after a failed token refresh the adapter logs in again with growing delay; only wrong credentials stop the login, a temporary error of the account service is retried
 - (typhosj) an endpoint the car rejected is asked again once a day instead of never until restart; an answer without data counts as not supported; an endpoint with server errors for 24 hours is asked only hourly, and its server error is logged once as warning
 - (typhosj) login and requests use the country from the settings instead of always Germany
-- (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning
+- (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning, and the link to the current key in the settings points to renault-api, where the lookup reads it
 - (typhosj) polls no longer overlap, requests time out after 30 seconds, no timer survives a stop of the instance, and the adapter only listens to its remote states
 - (typhosj) the adapter icon and readme links point to the `main` branch again
 - (typhosj) lint uses the shared `@iobroker/eslint-config`; dependencies updated

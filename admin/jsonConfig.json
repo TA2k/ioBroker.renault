@@ -118,7 +118,7 @@
     "_apiKeyLink": {
       "type": "staticLink",
       "label": "Click here for current API Key",
-      "href": "https://github.com/db-EV/ZoePHP/blob/main/src/api-keys.php",
+      "href": "https://github.com/hacf-fr/renault-api/blob/main/src/renault_api/const.py",
       "newLine": true,
       "xs": 12,
       "sm": 12,
