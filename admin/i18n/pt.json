@@ -7,12 +7,12 @@
     "Charge history entries to keep": "Entradas do histórico de carregamento a manter",
     "Click here for current API Key": "Clique aqui para a chave API atual",
     "Country": "País",
+    "Country of the account in the app": "País da conta na aplicação",
     "Disable charge fetching": "Desativar obtenção de carga",
     "If empty, the API key will be set automatically": "Se vazio, a chave API será definida automaticamente",
     "Login": "Login",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Número de entradas mais recentes mantidas por endpoint do histórico de carregamento (0 = ilimitado)",
     "Polling": "Sondagem",
     "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia e Alpine utilizam contas e chaves de API diferentes",
-    "Two-letter country code, e.g. de, fr, it, es": "Código de país de duas letras, por exemplo de, fr, it, es",
     "Update interval in minutes": "Intervalo de atualização em minutos"
 }

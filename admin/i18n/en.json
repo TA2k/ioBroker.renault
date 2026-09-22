@@ -7,12 +7,12 @@
     "Charge history entries to keep": "Charge history entries to keep",
     "Click here for current API Key": "Click here for current API Key",
     "Country": "Country",
+    "Country of the account in the app": "Country of the account in the app",
     "Disable charge fetching": "Disable charge fetching",
     "If empty, the API key will be set automatically": "If empty, the API key will be set automatically",
     "Login": "Login",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Number of most recent entries kept per charge-history endpoint (0 = unlimited)",
     "Polling": "Polling",
     "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia and Alpine use different accounts and API keys",
-    "Two-letter country code, e.g. de, fr, it, es": "Two-letter country code, e.g. de, fr, it, es",
     "Update interval in minutes": "Update interval in minutes"
 }

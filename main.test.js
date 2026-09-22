@@ -648,6 +648,15 @@ describe('Kamereon API key', () => {
 });
 
 describe('country and locale', () => {
+  for (const { value } of require('./admin/jsonConfig.json').items.country.options) {
+    it(`finds a locale of the My Renault app for the country ${value} of the settings`, async () => {
+      const adapter = setup();
+      adapter.config.country = value;
+      await adapter.onReady();
+      expect(adapter.locale).to.match(new RegExp('^[a-z]{2}-' + value.toUpperCase() + '$'));
+    });
+  }
+
   /** @type {[unknown, string, string, string][]} */
   const cases = [
     ['fr', 'FR', 'fr-FR', 'fr'],

@@ -7,12 +7,12 @@
     "Charge history entries to keep": "Записи історії заряджання, що зберігаються",
     "Click here for current API Key": "Натисніть тут для отримання поточного API ключа",
     "Country": "Країна",
+    "Country of the account in the app": "Країна облікового запису в застосунку",
     "Disable charge fetching": "Вимкнути отримання даних про зарядку",
     "If empty, the API key will be set automatically": "Якщо порожньо, API ключ буде встановлено автоматично",
     "Login": "Вхід",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Кількість останніх записів, що зберігаються для кожного ендпоінта історії заряджання (0 = без обмежень)",
     "Polling": "Опитування",
     "Renault/Dacia and Alpine use different accounts and API keys": "Renault/Dacia та Alpine використовують різні облікові записи та API-ключі",
-    "Two-letter country code, e.g. de, fr, it, es": "Дволітерний код країни, наприклад de, fr, it, es",
     "Update interval in minutes": "Інтервал оновлення в хвилинах"
 }

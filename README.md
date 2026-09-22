@@ -27,7 +27,7 @@ car works with the adapter when it can be controlled in that app.
 1. Install the adapter via the ioBroker admin UI.
 2. Open the adapter configuration and enter the credentials of your **My Renault** (or **My Dacia** / **My Alpine**) account: app email and app password.
 3. Select the **brand** matching your app: `Renault / Dacia` or `Alpine` (they use separate accounts and API keys).
-4. Set the **country** to the two-letter country code matching your account (e.g. `de`, `fr`, `it`, `es`).
+4. Select the **country** of your account in the app.
 5. Optionally set the polling **interval** in minutes and the **API key** (leave empty for auto-detect).
 6. Save and the instance will start polling.
 
@@ -202,7 +202,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - (typhosj) when the request quota is used up (429), polling pauses for 15, 30 and then 60 minutes instead of logging an error per endpoint; a command that meets the quota error starts the pause too
 - (typhosj) an expired token during a poll is refreshed and the poll repeated once; after a failed token refresh the adapter logs in again with growing delay; only wrong credentials stop the login, a temporary error of the account service is retried
 - (typhosj) an endpoint the car rejected is asked again once a day instead of never until restart; an answer without data counts as not supported; an endpoint with server errors for 24 hours is asked only hourly, and its server error is logged once as warning
-- (typhosj) login and requests use the country from the settings instead of always Germany
+- (typhosj) login and requests use the country from the settings instead of always Germany; the settings offer the countries of the My Renault app as a list
 - (typhosj) the Kamereon API key lookup accepts only a well-formed key; an invalid key in the settings is ignored with a warning, and the link to the current key in the settings points to renault-api, where the lookup reads it
 - (typhosj) polls no longer overlap, requests time out after 30 seconds, no timer survives a stop of the instance, and the adapter only listens to its remote states
 - (typhosj) the adapter icon and readme links point to the `main` branch again
