@@ -182,7 +182,7 @@ above; the adapter does not create it, and removes it if an older version had cr
   ### **WORK IN PROGRESS**
 -->
 
-### **WORK IN PROGRESS**
+### 1.0.0 (2026-09-23)
 
 - (typhosj) **Breaking change:** the remote states are renamed and every command is a button. `actions/hvac-start` becomes `climateStart` and `climateStop`, `hvac-temperature` becomes `climateTemperature` (default 21 °C, a valid old value is taken over), `actions/charging-start`, `charge/pause-resume` and `charge/start` become `chargingStart` and `chargingStop`, and `refresh` becomes `refreshAll`. The old states are removed on the first start. Adjust scripts and visualizations
 - (typhosj) **Breaking change:** only one cockpit version is polled per vehicle (v2 if it answers, else v1; v1 fills in while v2 answers with server errors), and its data is always written to `cockpit`; the `cockpitv2` channel is removed

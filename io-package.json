@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "renault",
-    "version": "0.0.25",
+    "version": "1.0.0",
     "news": {
+      "1.0.0": {
+        "en": "**Breaking change:** the states of the remote control are renamed and every command is a button; the old ones are removed on the first start. Adjust scripts and visualizations\n**Breaking change:** only one cockpit version is polled per vehicle, and the second cockpit channel is removed\n**Breaking change:** battery, range, mileage, fuel and temperature get units and matching roles, and the shortest update interval is 5 minutes\nCommands and polled data follow the model of each vehicle; new are charge limits, charge mode, horn, lights, tyre pressure and alerts\nFar fewer requests against the hourly quota of Renault, a pause instead of errors once it is used up, and an expired token is renewed instead of losing the poll\nThe country comes from the settings instead of always Germany, and the log no longer contains personal data",
+        "de": "**Breaking Change:** Die Datenpunkte der Fernsteuerung sind umbenannt und jeder Befehl ist ein Knopf; die alten werden beim ersten Start entfernt. Skripte und Visualisierungen anpassen\n**Breaking Change:** Je Fahrzeug wird nur noch eine Cockpit-Version abgefragt, der zweite Cockpit-Kanal entfällt\n**Breaking Change:** Batterie, Reichweite, Kilometerstand, Kraftstoff und Temperatur bekommen Einheiten und passende Rollen, und das kürzeste Abfrageintervall beträgt 5 Minuten\nBefehle und abgefragte Daten richten sich nach dem Modell des Fahrzeugs; neu sind Ladegrenzen, Lademodus, Hupe, Licht, Reifendruck und Warnmeldungen\nDeutlich weniger Anfragen gegen das Stundenkontingent von Renault, eine Pause statt Fehlern sobald es aufgebraucht ist, und ein abgelaufenes Token wird erneuert statt die Abfrage zu verlieren\nDas Land kommt aus den Einstellungen statt immer Deutschland, und das Log enthält keine persönlichen Daten mehr",
+        "ru": "**Критическое изменение:** точки данных пульта переименованы, и каждая команда теперь кнопка; старые удаляются при первом запуске. Измените скрипты и визуализации\n**Критическое изменение:** для каждого автомобиля опрашивается только одна версия кокпита, второй канал кокпита удалён\n**Критическое изменение:** заряд, запас хода, пробег, топливо и температура получают единицы измерения и подходящие роли, а минимальный интервал опроса — 5 минут\nКоманды и опрашиваемые данные зависят от модели автомобиля; добавлены пределы заряда, режим зарядки, звуковой сигнал, фары, давление в шинах и предупреждения\nЗначительно меньше запросов к часовой квоте Renault, пауза вместо ошибок при её исчерпании, а истёкший токен обновляется вместо потери опроса\nСтрана берётся из настроек, а не всегда Германия, и журнал больше не содержит личных данных",
+        "pt": "**Alteração incompatível:** os pontos de dados do controlo remoto foram renomeados e cada comando é um botão; os antigos são removidos no primeiro arranque. Ajuste os scripts e as visualizações\n**Alteração incompatível:** apenas uma versão do cockpit é consultada por veículo e o segundo canal do cockpit foi removido\n**Alteração incompatível:** bateria, autonomia, quilometragem, combustível e temperatura passam a ter unidades e funções adequadas, e o intervalo de consulta mínimo é de 5 minutos\nOs comandos e os dados consultados seguem o modelo de cada veículo; são novos os limites de carga, o modo de carga, a buzina, as luzes, a pressão dos pneus e os alertas\nMuito menos pedidos face à quota horária da Renault, uma pausa em vez de erros quando esta se esgota, e um token expirado é renovado em vez de se perder a consulta\nO país vem das definições em vez de ser sempre a Alemanha, e o registo já não contém dados pessoais",
+        "nl": "**Ingrijpende wijziging:** de datapunten van de afstandsbediening zijn hernoemd en elke opdracht is een knop; de oude worden bij de eerste start verwijderd. Pas scripts en visualisaties aan\n**Ingrijpende wijziging:** per voertuig wordt nog maar één cockpitversie opgevraagd en het tweede cockpitkanaal vervalt\n**Ingrijpende wijziging:** accu, actieradius, kilometerstand, brandstof en temperatuur krijgen eenheden en passende rollen, en het kortste opvraaginterval is 5 minuten\nOpdrachten en opgevraagde gegevens volgen het model van het voertuig; nieuw zijn laadgrenzen, laadmodus, claxon, verlichting, bandenspanning en waarschuwingen\nVeel minder verzoeken tegen het uurquotum van Renault, een pauze in plaats van fouten zodra dat op is, en een verlopen token wordt vernieuwd in plaats van de opvraag te verliezen\nHet land komt uit de instellingen in plaats van altijd Duitsland, en het logboek bevat geen persoonlijke gegevens meer",
+        "fr": "**Changement incompatible :** les points de données de la télécommande sont renommés et chaque commande est un bouton ; les anciens sont supprimés au premier démarrage. Adaptez les scripts et les visualisations\n**Changement incompatible :** une seule version du cockpit est interrogée par véhicule et le second canal cockpit disparaît\n**Changement incompatible :** batterie, autonomie, kilométrage, carburant et température reçoivent des unités et des rôles adaptés, et l’intervalle d’interrogation le plus court est de 5 minutes\nLes commandes et les données interrogées dépendent du modèle du véhicule ; nouveautés : limites de charge, mode de charge, klaxon, feux, pression des pneus et alertes\nBeaucoup moins de requêtes face au quota horaire de Renault, une pause au lieu d’erreurs lorsqu’il est épuisé, et un jeton expiré est renouvelé au lieu de perdre l’interrogation\nLe pays provient des paramètres au lieu de toujours l’Allemagne, et le journal ne contient plus de données personnelles",
+        "it": "**Modifica incompatibile:** i punti dati del telecomando sono rinominati e ogni comando è un pulsante; i vecchi vengono rimossi al primo avvio. Adattare script e visualizzazioni\n**Modifica incompatibile:** per ogni veicolo viene interrogata una sola versione del cockpit e il secondo canale cockpit viene rimosso\n**Modifica incompatibile:** batteria, autonomia, chilometraggio, carburante e temperatura ricevono unità e ruoli adeguati, e l’intervallo di interrogazione più breve è di 5 minuti\nI comandi e i dati interrogati dipendono dal modello del veicolo; sono nuovi i limiti di carica, la modalità di carica, il clacson, le luci, la pressione degli pneumatici e gli avvisi\nMolte meno richieste rispetto alla quota oraria di Renault, una pausa invece di errori quando è esaurita, e un token scaduto viene rinnovato invece di perdere l’interrogazione\nIl paese proviene dalle impostazioni invece che sempre la Germania, e il log non contiene più dati personali",
+        "es": "**Cambio incompatible:** los puntos de datos del mando a distancia se renombran y cada comando es un botón; los antiguos se eliminan en el primer arranque. Ajuste los scripts y las visualizaciones\n**Cambio incompatible:** solo se consulta una versión del cockpit por vehículo y el segundo canal de cockpit desaparece\n**Cambio incompatible:** batería, autonomía, kilometraje, combustible y temperatura reciben unidades y roles adecuados, y el intervalo de consulta más corto es de 5 minutos\nLos comandos y los datos consultados dependen del modelo del vehículo; son nuevos los límites de carga, el modo de carga, el claxon, las luces, la presión de los neumáticos y las alertas\nMuchas menos peticiones frente a la cuota horaria de Renault, una pausa en lugar de errores cuando se agota, y un token caducado se renueva en lugar de perder la consulta\nEl país procede de la configuración en lugar de ser siempre Alemania, y el registro ya no contiene datos personales",
+        "pl": "**Zmiana niekompatybilna:** punkty danych pilota zostały przemianowane, a każde polecenie jest przyciskiem; stare są usuwane przy pierwszym starcie. Dostosuj skrypty i wizualizacje\n**Zmiana niekompatybilna:** dla każdego pojazdu odpytywana jest tylko jedna wersja kokpitu, a drugi kanał kokpitu zostaje usunięty\n**Zmiana niekompatybilna:** bateria, zasięg, przebieg, paliwo i temperatura otrzymują jednostki i właściwe role, a najkrótszy interwał odpytywania to 5 minut\nPolecenia i odpytywane dane zależą od modelu pojazdu; nowe są limity ładowania, tryb ładowania, klakson, światła, ciśnienie w oponach i ostrzeżenia\nZnacznie mniej zapytań wobec godzinowego limitu Renault, pauza zamiast błędów po jego wyczerpaniu, a wygasły token jest odnawiany zamiast utraty odpytania\nKraj pochodzi z ustawień zamiast zawsze Niemiec, a dziennik nie zawiera już danych osobowych",
+        "uk": "**Критична зміна:** точки даних пульта перейменовано, і кожна команда тепер кнопка; старі видаляються під час першого запуску. Змініть скрипти та візуалізації\n**Критична зміна:** для кожного автомобіля опитується лише одна версія кокпіта, а другий канал кокпіта видалено\n**Критична зміна:** заряд, запас ходу, пробіг, пальне й температура отримують одиниці та відповідні ролі, а найкоротший інтервал опитування — 5 хвилин\nКоманди та опитувані дані залежать від моделі автомобіля; додано межі заряду, режим заряджання, звуковий сигнал, фари, тиск у шинах і попередження\nЗначно менше запитів до годинної квоти Renault, пауза замість помилок після її вичерпання, а протермінований токен оновлюється замість втрати опитування\nКраїна береться з налаштувань, а не завжди Німеччина, і журнал більше не містить особистих даних",
+        "zh-cn": "**重大变更：**遥控数据点已重命名，每个命令都是一个按钮；旧数据点会在首次启动时删除。请调整脚本和可视化\n**重大变更：**每辆车只轮询一个座舱版本，第二个座舱通道已移除\n**重大变更：**电量、续航、里程、燃料和温度带有单位和相应角色，最短轮询间隔为 5 分钟\n命令和轮询的数据取决于车辆型号；新增充电限值、充电模式、喇叭、灯光、胎压和警报\n对雷诺每小时配额的请求大幅减少，配额用尽时暂停而不是报错，令牌过期后会续期而不会丢失本次轮询\n国家/地区来自设置而不再固定为德国，日志中不再包含个人数据"
+      },
       "0.0.25": {
         "en": "more robust startup with retry, truthful connection state, no secrets in the log, require Node.js 22+",
         "de": "robusterer Start mit Wiederholung, ehrlicher Verbindungsstatus, keine Geheimnisse im Log, benötigt Node.js 22+",
@@ -80,19 +93,6 @@
         "pl": "Zaktualizowano klucz API",
         "uk": "Оновлено API-ключ",
         "zh-cn": "更新 API 密钥"
-      },
-      "0.0.15": {
-        "en": "fix charge start and reduce error logs",
-        "de": "Ladestart korrigiert und Fehlerprotokolle reduziert",
-        "ru": "Исправлен запуск зарядки и уменьшены журналы ошибок",
-        "pt": "Correção do início de carga e redução dos logs de erro",
-        "nl": "Laadstart gerepareerd en foutlogboeken verminderd",
-        "fr": "Correction du démarrage de charge et réduction des journaux d'erreur",
-        "it": "Correzione dell'avvio della carica e riduzione dei log degli errori",
-        "es": "Corregido el inicio de carga y reducidos los registros de error",
-        "pl": "Naprawiono start ładowania i zmniejszono logi błędów",
-        "uk": "Виправлено старт зарядки та зменшено журнали помилок",
-        "zh-cn": "修复充电启动并减少错误日志"
       }
     },
     "titleLang": {
@@ -121,8 +121,19 @@
       "uk": "Адаптер для автомобілів Renault, Dacia та Alpine",
       "zh-cn": "适用于雷诺、达契亚和 Alpine 汽车的适配器"
     },
-    "authors": ["TA2k <tombox2020@gmail.com>"],
-    "keywords": ["renault", "Renault", "dacia", "Dacia", "alpine", "Alpine", "zoe", "kangoo"],
+    "authors": [
+      "TA2k <tombox2020@gmail.com>"
+    ],
+    "keywords": [
+      "renault",
+      "Renault",
+      "dacia",
+      "Dacia",
+      "alpine",
+      "Alpine",
+      "zoe",
+      "kangoo"
+    ],
     "licenseInformation": {
       "type": "free",
       "license": "MIT"
@@ -158,8 +169,12 @@
       }
     ]
   },
-  "encryptedNative": ["password"],
-  "protectedNative": ["password"],
+  "encryptedNative": [
+    "password"
+  ],
+  "protectedNative": [
+    "password"
+  ],
   "native": {
     "username": "",
     "country": "de",
