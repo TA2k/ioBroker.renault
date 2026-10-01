@@ -30,6 +30,7 @@ class FakeAdapter extends EventEmitter {
     this.clearInterval = sinon.spy();
     this.subscribeStates = sinon.spy();
     this.sendTo = sinon.spy();
+    this.getForeignObjectAsync = sinon.stub().resolves(null);
   }
 
   /** @param {string} id */

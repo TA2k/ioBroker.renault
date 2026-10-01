@@ -179,9 +179,6 @@
       "variant": "outlined",
       "showProcess": true,
       "timeout": 35000,
-      "result": {
-        "ok": "Email and password are correct. Save and close to start the adapter."
-      },
       "error": {
         "missing": "Enter email and password first.",
         "rejected": "Email or password is wrong. Use the same login as in the app.",

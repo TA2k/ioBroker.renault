@@ -46,10 +46,28 @@ describe('login test from the settings page', () => {
   it('accepts working credentials with the values typed into the page', async () => {
     const adapter = setup();
     await ask(adapter, { username: ' typed@example.com ', password: 'typed' });
-    expect(answer(adapter)).to.deep.equal({ result: 'ok' });
+    expect(answer(adapter)).to.deep.equal({ result: 'Email and password are correct. Save and close to start the adapter.' });
     const body = adapter.requestClient.lastCall.args[0].data;
     expect(body).to.include('loginID=typed%40example.com').and.include('password=typed');
   });
+
+  it('answers a working login in the system language', async () => {
+    const adapter = setup();
+    adapter.getForeignObjectAsync = sinon.stub().resolves({ common: { language: 'de' } });
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({
+      result: 'E-Mail und Passwort sind richtig. Speichern und schließen, um den Adapter zu starten.',
+    });
+  });
+
+  for (const language of ['xx', '../../package', 'DE', 42]) {
+    it('falls back to English for the system language ' + JSON.stringify(language), async () => {
+      const adapter = setup();
+      adapter.getForeignObjectAsync = sinon.stub().resolves({ common: { language } });
+      await ask(adapter, { username: 'a@b.c', password: 'x' });
+      expect(answer(adapter)).to.deep.equal({ result: 'Email and password are correct. Save and close to start the adapter.' });
+    });
+  }
 
   it('reports a rejected login without logging the password', async () => {
     const adapter = setup({ 'accounts.login': { errorCode: 403042, errorMessage: 'Invalid LoginID' } });
@@ -92,7 +110,7 @@ describe('login test from the settings page', () => {
   it('accepts the longest allowed email and password', async () => {
     const adapter = setup();
     await ask(adapter, { username: 'a'.repeat(254), password: 'x'.repeat(1024) });
-    expect(answer(adapter)).to.deep.equal({ result: 'ok' });
+    expect(answer(adapter)).to.deep.equal({ result: 'Email and password are correct. Save and close to start the adapter.' });
   });
 
   it('runs one test at a time', async () => {
@@ -104,7 +122,7 @@ describe('login test from the settings page', () => {
     expect(answer(adapter)).to.deep.equal({ error: 'busy' });
     release({ sessionInfo: { cookieValue: 'C' } });
     await first;
-    expect(answer(adapter)).to.deep.equal({ result: 'ok' });
+    expect(answer(adapter)).to.deep.equal({ result: 'Email and password are correct. Save and close to start the adapter.' });
   });
 
   it('ignores other commands and messages without callback', async () => {

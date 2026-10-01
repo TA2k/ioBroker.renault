@@ -59,6 +59,7 @@ const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
  * captcha required. Every other error body (server error, temporary lockout) is retried.
  */
 const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
+const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
 // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
 const GIGYA_API_KEY = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
 const QUOTA_PAUSE_MINUTES = [15, 30, 60];
@@ -1677,6 +1678,33 @@ class Renault extends utils.Adapter {
   }
 
   /**
+   * Translate a text of the settings page into the system language.
+   *
+   * json-config 10 alerts the text mapped to a success answer and then the raw answer again, and
+   * admin 8 shows only the last of the two, so a success text has to arrive already translated.
+   *
+   * @param {string} text English text, the key in admin/i18n
+   * @returns {Promise<string>}
+   */
+  async translate(text) {
+    const config = await this.getForeignObjectAsync('system.config').catch(() => null);
+    for (const language of [config?.common?.language, 'en']) {
+      if (typeof language !== 'string' || !/^[a-z]{2}(-[a-z]{2})?$/.test(language)) {
+        continue;
+      }
+      try {
+        const translated = require('./admin/i18n/' + language + '.json')[text];
+        if (typeof translated === 'string' && translated) {
+          return translated;
+        }
+      } catch {
+        // no file for this language
+      }
+    }
+    return text;
+  }
+
+  /**
    * Answers the "Test login" button of the settings page. Only the Gigya login is tried, with the
    * values typed into the page, so a wrong email or password shows up before saving. The running
    * session is not touched, and neither the password nor the answer of the server is logged.
@@ -1715,7 +1743,7 @@ class Renault extends utils.Adapter {
       });
       const data = res?.data ?? {};
       if (data.sessionInfo?.cookieValue) {
-        reply({ result: 'ok' });
+        reply({ result: await this.translate(LOGIN_OK_TEXT) });
       } else if (LOGIN_REJECTED_CODES.includes(Number(data.errorCode))) {
         reply({ error: 'rejected' });
       } else {
