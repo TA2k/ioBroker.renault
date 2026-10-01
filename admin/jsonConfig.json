@@ -169,6 +169,45 @@
       "lg": 3,
       "xl": 3
     },
+    "_testLogin": {
+      "type": "sendTo",
+      "label": "Test login",
+      "help": "Checks email and password with the values on this page, without saving",
+      "command": "testLogin",
+      "jsonData": "{\"username\": \"${data.username}\", \"password\": \"${data.password}\"}",
+      "icon": "auth",
+      "variant": "outlined",
+      "showProcess": true,
+      "timeout": 35000,
+      "result": {
+        "ok": "Email and password are correct. Save and close to start the adapter."
+      },
+      "error": {
+        "missing": "Enter email and password first.",
+        "rejected": "Email or password is wrong. Use the same login as in the app.",
+        "failed": "The account service refused the login. Log in once in the app, then try again.",
+        "unreachable": "The account service did not answer. Check the internet connection of ioBroker and try again.",
+        "busy": "A login test is already running."
+      },
+      "newLine": true,
+      "xs": 12,
+      "sm": 12,
+      "md": 4,
+      "lg": 3,
+      "xl": 3
+    },
+    "_connection": {
+      "type": "state",
+      "label": "Connection",
+      "oid": "info.connection",
+      "trueText": "Connected",
+      "falseText": "Not connected",
+      "xs": 12,
+      "sm": 12,
+      "md": 4,
+      "lg": 3,
+      "xl": 3
+    },
     "_pollingHeader": {
       "type": "header",
       "text": "Polling",

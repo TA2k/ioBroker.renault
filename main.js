@@ -59,6 +59,8 @@ const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
  * captcha required. Every other error body (server error, temporary lockout) is retried.
  */
 const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
+// Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
+const GIGYA_API_KEY = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
 const QUOTA_PAUSE_MINUTES = [15, 30, 60];
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -352,6 +354,7 @@ class Renault extends utils.Adapter {
     this.on('ready', this.onReady.bind(this));
     this.on('stateChange', this.onStateChange.bind(this));
     this.on('unload', this.onUnload.bind(this));
+    this.on('message', this.onMessage.bind(this));
     this.deviceArray = [];
     this.json2iob = new Json2iob(this);
     /** @type {Record<string, Record<string, number>>} vin -> endpoint path -> time it was rejected */
@@ -400,6 +403,8 @@ class Renault extends utils.Adapter {
     this.refreshes = new Set();
     /** Set by onUnload; nothing schedules a timer after it. */
     this.unloading = false;
+    /** A login test from the settings page is running; a second click waits for it. */
+    this.loginTestRunning = false;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -472,8 +477,7 @@ class Renault extends utils.Adapter {
     }
     this.brand = this.config.brand === 'alpine' ? 'alpine' : 'renault';
     this.session = {};
-    // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
-    this.apiKey = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
+    this.apiKey = GIGYA_API_KEY;
     if (this.brand === 'alpine') {
       this.product = 'MYALPINE';
       this.accountTypes = ['MYALPINE'];
@@ -1669,6 +1673,60 @@ class Renault extends utils.Adapter {
     } catch (e) {
       this.log.error('Error onUnload: ' + e);
       callback();
+    }
+  }
+
+  /**
+   * Answers the "Test login" button of the settings page. Only the Gigya login is tried, with the
+   * values typed into the page, so a wrong email or password shows up before saving. The running
+   * session is not touched, and neither the password nor the answer of the server is logged.
+   *
+   * @param {ioBroker.Message} obj
+   */
+  async onMessage(obj) {
+    if (!obj?.callback || obj.command !== 'testLogin') {
+      return;
+    }
+    const reply = (answer) => this.sendTo(obj.from, obj.command, answer, obj.callback);
+    const message = obj.message && typeof obj.message === 'object' ? /** @type {Record<string, unknown>} */ (obj.message) : {};
+    const username = typeof message.username === 'string' ? message.username.trim() : '';
+    const password = typeof message.password === 'string' ? message.password : '';
+    if (!username || !password || username.length > 254 || password.length > 1024) {
+      reply({ error: 'missing' });
+      return;
+    }
+    if (this.loginTestRunning) {
+      reply({ error: 'busy' });
+      return;
+    }
+    this.loginTestRunning = true;
+    try {
+      const res = await this.requestClient({
+        method: 'post',
+        url: 'https://accounts.eu1.gigya.com/accounts.login',
+        headers: {
+          'User-Agent': this.userAgent,
+          Accept: '*/*',
+          'Accept-Language': this.locale.toLowerCase(),
+          'Cache-Control': 'no-cache',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        data: qs.stringify({ apikey: GIGYA_API_KEY, format: 'json', httpStatusCodes: 'false', loginID: username, password }),
+      });
+      const data = res?.data ?? {};
+      if (data.sessionInfo?.cookieValue) {
+        reply({ result: 'ok' });
+      } else if (LOGIN_REJECTED_CODES.includes(Number(data.errorCode))) {
+        reply({ error: 'rejected' });
+      } else {
+        this.log.info('Login test failed: ' + data.errorCode + ' ' + data.errorMessage);
+        reply({ error: 'failed' });
+      }
+    } catch (error) {
+      this.log.info('Login test failed: ' + /** @type {Error} */ (error).message);
+      reply({ error: 'unreachable' });
+    } finally {
+      this.loginTestRunning = false;
     }
   }
 

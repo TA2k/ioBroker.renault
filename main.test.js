@@ -30,6 +30,102 @@ const DAY = 24 * HOUR;
 const urls = (adapter) => adapter.requestClient.getCalls().map((call) => call.args[0].url);
 const logged = (spy) => spy.getCalls().map((call) => String(call.args[0]));
 
+describe('login test from the settings page', () => {
+  /**
+   * @param {any} adapter
+   * @param {unknown} message
+   * @param {string} [command]
+   */
+  function ask(adapter, message, command = 'testLogin') {
+    return adapter.onMessage(
+      /** @type {ioBroker.Message} */ (/** @type {unknown} */ ({ command, message, from: 'system.adapter.admin.0', callback: { id: 1 } })),
+    );
+  }
+  const answer = (adapter) => adapter.sendTo.lastCall?.args[2];
+
+  it('accepts working credentials with the values typed into the page', async () => {
+    const adapter = setup();
+    await ask(adapter, { username: ' typed@example.com ', password: 'typed' });
+    expect(answer(adapter)).to.deep.equal({ result: 'ok' });
+    const body = adapter.requestClient.lastCall.args[0].data;
+    expect(body).to.include('loginID=typed%40example.com').and.include('password=typed');
+  });
+
+  it('reports a rejected login without logging the password', async () => {
+    const adapter = setup({ 'accounts.login': { errorCode: 403042, errorMessage: 'Invalid LoginID' } });
+    await ask(adapter, { username: 'a@b.c', password: 'wrong-pass' });
+    expect(answer(adapter)).to.deep.equal({ error: 'rejected' });
+    const all = [...logged(adapter.log.info), ...logged(adapter.log.warn), ...logged(adapter.log.error), ...logged(adapter.log.debug)];
+    expect(all.join(' ')).to.not.include('wrong-pass');
+  });
+
+  it('tells other account errors apart from a wrong password', async () => {
+    const adapter = setup({ 'accounts.login': { errorCode: 206002, errorMessage: 'Account Pending Verification' } });
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({ error: 'failed' });
+  });
+
+  it('reports a network failure as unreachable', async () => {
+    const adapter = setup({ 'accounts.login': new Error('ECONNRESET') });
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({ error: 'unreachable' });
+    expect(adapter.loginTestRunning).to.equal(false);
+  });
+
+  for (const [name, message] of /** @type {[string, unknown][]} */ ([
+    ['no message', undefined],
+    ['a string message', 'a@b.c'],
+    ['an empty email', { username: '   ', password: 'x' }],
+    ['no password', { username: 'a@b.c' }],
+    ['a numeric password', { username: 'a@b.c', password: 1234 }],
+    ['an overlong email', { username: 'a'.repeat(255), password: 'x' }],
+    ['an overlong password', { username: 'a@b.c', password: 'x'.repeat(1025) }],
+  ])) {
+    it('refuses ' + name + ' without calling the server', async () => {
+      const adapter = setup();
+      await ask(adapter, message);
+      expect(answer(adapter)).to.deep.equal({ error: 'missing' });
+      expect(adapter.requestClient.called).to.equal(false);
+    });
+  }
+
+  it('accepts the longest allowed email and password', async () => {
+    const adapter = setup();
+    await ask(adapter, { username: 'a'.repeat(254), password: 'x'.repeat(1024) });
+    expect(answer(adapter)).to.deep.equal({ result: 'ok' });
+  });
+
+  it('runs one test at a time', async () => {
+    /** @type {(value: unknown) => void} */
+    let release = () => {};
+    const adapter = setup({ 'accounts.login': () => new Promise((resolve) => (release = resolve)) });
+    const first = ask(adapter, { username: 'a@b.c', password: 'x' });
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({ error: 'busy' });
+    release({ sessionInfo: { cookieValue: 'C' } });
+    await first;
+    expect(answer(adapter)).to.deep.equal({ result: 'ok' });
+  });
+
+  it('ignores other commands and messages without callback', async () => {
+    const adapter = setup();
+    await ask(adapter, { username: 'a@b.c', password: 'x' }, 'other');
+    await adapter.onMessage(/** @type {ioBroker.Message} */ (/** @type {unknown} */ ({ command: 'testLogin', message: {} })));
+    expect(adapter.sendTo.called).to.equal(false);
+    expect(adapter.requestClient.called).to.equal(false);
+  });
+
+  it('leaves the running session and the connection state alone', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    const session = adapter.session;
+    const connection = adapter.states['info.connection'];
+    await ask(adapter, { username: 'other@example.com', password: 'other' });
+    expect(adapter.session).to.equal(session);
+    expect(adapter.states['info.connection']).to.equal(connection);
+  });
+});
+
 describe('startup', () => {
   it('loads vehicles, polls and reports the connection after a successful login', async () => {
     const adapter = setup();
