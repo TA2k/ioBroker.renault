@@ -140,6 +140,8 @@ const DATA_ROLES = {
   frPressure: 'value.pressure',
   rlPressure: 'value.pressure',
   rrPressure: 'value.pressure',
+  gpsLatitude: 'value.gps.latitude',
+  gpsLongitude: 'value.gps.longitude',
 };
 
 /** Meaning of the status codes of battery-status, from renault-api kamereon/enums.py (ChargeState, PlugState). */

@@ -1810,6 +1810,8 @@ describe('vehicle data objects', () => {
     expect(common('battery-status.chargingRemainingTime')).to.include({ type: 'number', unit: 'min' });
     expect(common('cockpit.totalMileage')).to.include({ type: 'number', role: 'value.distance', unit: 'km' });
     expect(common('cockpit.fuelQuantity')).to.include({ type: 'number', role: 'value.fill', unit: 'l' });
+    expect(common('location.gpsLatitude')).to.include({ type: 'number', role: 'value.gps.latitude', write: false });
+    expect(common('location.gpsLongitude')).to.include({ type: 'number', role: 'value.gps.longitude', write: false });
     // json2iob with forceIndex names array entries <key>01, <key>02, … (checked with json2iob 2.6.25)
     expect(common('charges.charges01.chargeStartBatteryLevel')).to.include({ type: 'number', unit: '%' });
   });
