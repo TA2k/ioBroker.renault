@@ -184,6 +184,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 -->
 ### **WORK IN PROGRESS**
 - Added a **Test login** button to the settings page. It checks email and password with the values on the page before saving and says whether they are wrong or the service did not answer. The page also shows whether the instance is connected.
+- A space before or after the email in the settings no longer makes the login fail with `403042 Invalid LoginID` (#82).
 - GPS latitude and longitude now carry the roles `value.gps.latitude` and `value.gps.longitude`, so map widgets and the type detector find the vehicle position. Existing states are updated on the next start.
 
 ### 1.0.0 (2026-09-23)

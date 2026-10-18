@@ -2963,6 +2963,19 @@ describe('startup failures', () => {
       expect(logged(adapter.log.error).some((line) => line.includes('Email or password is missing'))).to.equal(true);
     });
   }
+
+  // Gigya answers 403042 Invalid LoginID for an email with a space around it
+  for (const username of [' user@example.com', 'user@example.com ', '\tuser@example.com\n', 'user@example.com']) {
+    it(`logs in with the email ${JSON.stringify(username)} trimmed and the password unchanged`, async () => {
+      const adapter = setup();
+      adapter.config.username = username;
+      adapter.config.password = ' secret ';
+      await adapter.onReady();
+      const login = adapter.requestClient.getCalls().find((call) => call.args[0].url.includes('accounts.login'));
+      expect(login?.args[0].data).to.include('loginID=user%40example.com&').and.include('password=%20secret%20');
+      expect(adapter.states['info.connection']).to.equal(true);
+    });
+  }
 });
 
 describe('charge history limit', () => {

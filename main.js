@@ -486,7 +486,9 @@ class Renault extends utils.Adapter {
       this.product = 'MYRENAULT';
       this.accountTypes = ['MYRENAULT', 'MYDACIA'];
     }
-    if (!String(this.config.username ?? '').trim() || !this.config.password) {
+    // a space around the email makes Gigya answer 403042 Invalid LoginID; the password stays as typed
+    this.config.username = String(this.config.username ?? '').trim();
+    if (!this.config.username || !this.config.password) {
       this.log.error('Email or password is missing. Enter both in the adapter settings; the adapter does nothing until then.');
       return;
     }
