@@ -77,6 +77,40 @@ describe('login test from the settings page', () => {
     expect(all.join(' ')).to.not.include('wrong-pass');
   });
 
+  it('reports a login that needs a code by email', async () => {
+    const adapter = setup({ 'accounts.login': { errorCode: 403101, errorMessage: 'Account Pending TFA Verification', regToken: 'R' } });
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({ error: 'twoFactor' });
+    expect(require('./admin/jsonConfig.json').items._testLogin.error.twoFactor).to.be.a('string');
+  });
+
+  // admin evaluates jsonData as a template literal; for a bare `${data.x}` admin 7 escapes only
+  // quotes in the value, admin 8 also backslashes, neither escapes control characters
+  for (const [name, escapeData] of [
+    ['admin 7', '${$1.replace(/"/g, \'\\\\"\')}'],
+    ['admin 8', "${$1.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"')}"],
+  ]) {
+    for (const password of [
+      'plain',
+      'with"quote',
+      'back\\slash',
+      '\\"both',
+      'tab\there',
+      'line\nbreak',
+      'Ümlaut§€',
+      '${x}',
+      '`tick`',
+      '',
+    ]) {
+      it(`sends the password ${JSON.stringify(password)} unchanged with ${name}`, () => {
+        const jsonData = require('./admin/jsonConfig.json').items._testLogin.jsonData;
+        const pattern = jsonData.replace(/`/g, '\\`').replace(/\${(data\.[^}]+)}/g, escapeData);
+        const text = new Function('data', 'return `' + pattern + '`')({ username: 'a"b@c.d', password });
+        expect(JSON.parse(text)).to.deep.equal({ username: 'a"b@c.d', password });
+      });
+    }
+  }
+
   it('tells other account errors apart from a wrong password', async () => {
     const adapter = setup({ 'accounts.login': { errorCode: 206002, errorMessage: 'Account Pending Verification' } });
     await ask(adapter, { username: 'a@b.c', password: 'x' });
@@ -201,6 +235,19 @@ describe('startup', () => {
       const adapter = setup({ 'accounts.login': { errorCode, errorMessage } });
       await adapter.onReady();
       expect(adapter.timeouts).to.have.length(0);
+    });
+  }
+
+  for (const errorCode of [403101, '403101']) {
+    it(`stops with a two-factor hint when the login needs a code by email (${JSON.stringify(errorCode)})`, async () => {
+      const adapter = setup({ 'accounts.login': { errorCode, errorMessage: 'Account Pending TFA Verification', regToken: 'secret-reg' } });
+      await adapter.onReady();
+      expect(adapter.timeouts).to.have.length(0);
+      expect(adapter.states['info.connection']).to.equal(false);
+      const errors = logged(adapter.log.error);
+      expect(errors.some((line) => line.includes('two-factor authentication'))).to.equal(true);
+      expect(errors.some((line) => line.includes('Check email and password') || line.includes('new password'))).to.equal(false);
+      expect(errors.join(' ')).to.not.include('secret-reg');
     });
   }
 
@@ -1006,6 +1053,19 @@ describe('relogin', () => {
     expect(adapter.states['VIN1.remote.refreshAll']).to.equal(false);
     expect(adapter.states['VIN1.remote.chargeLimitTarget']).to.equal(undefined);
     expect(adapter.states['VIN1.remote.lastCommandError']).to.include('login was rejected');
+  });
+
+  it('sends no command after a relogin that needs a code by email', async () => {
+    const adapter = await connected();
+    failRefresh(adapter, { 'accounts.login': { errorCode: 403101, errorMessage: 'Account Pending TFA Verification' } });
+    await adapter.refreshToken();
+    const count = adapter.timeouts.length;
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.timeouts).to.have.length(count);
+    adapter.requestClient.resetHistory();
+    await adapter.onStateChange('renault.0.VIN1.remote.climateStart', userWrite(true));
+    expect(adapter.requestClient.called).to.equal(false);
+    expect(adapter.states['VIN1.remote.lastCommandError']).to.include('two-factor authentication');
   });
 
   it('keeps the target temperature writable after the login was rejected', async () => {

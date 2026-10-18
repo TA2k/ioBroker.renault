@@ -164,6 +164,10 @@ does not offer this data. The adapter asks again once a day, which costs one req
 My Renault (My Dacia, My Alpine) app, enter it in the adapter settings and restart the instance.
 Until then the adapter sends no commands, so it cannot lock the account with the old password.
 
+**The log says the account asks for a code by email (two-factor authentication).** Renault asks
+some accounts for a code sent by email at login. The adapter does not support this yet, so it stops
+after the first attempt instead of trying again.
+
 **The log says the Renault request quota is used up (429).** The account allows about 60 requests
 per hour, shared with the app. The adapter pauses by itself for 15, 30 and then 60 minutes. Raise
 the update interval, and use `refreshAll` rarely; the adapter warns once when its settings need
@@ -185,6 +189,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 ### **WORK IN PROGRESS**
 - Added a **Test login** button to the settings page. It checks email and password with the values on the page before saving and says whether they are wrong or the service did not answer. The page also shows whether the instance is connected.
 - A space before or after the email in the settings no longer makes the login fail with `403042 Invalid LoginID` (#82).
+- When the account asks for a code by email at login (two-factor authentication), the log and **Test login** say so, and the adapter stops instead of retrying. The adapter does not support this login yet.
 - GPS latitude and longitude now carry the roles `value.gps.latitude` and `value.gps.longitude`, so map widgets and the type detector find the vehicle position. Existing states are updated on the next start.
 
 ### 1.0.0 (2026-09-23)

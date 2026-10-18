@@ -25,5 +25,6 @@
     "Test login": "测试登录",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "账户服务没有响应。请检查 ioBroker 的互联网连接后重试。",
     "The account service refused the login. Log in once in the app, then try again.": "账户服务拒绝了登录。请先在应用中登录一次，然后重试。",
-    "Update interval in minutes": "更新间隔（分钟）"
+    "Update interval in minutes": "更新间隔（分钟）",
+    "Your account asks for a code by email at login. The adapter does not support this yet.": "您的账户在登录时要求输入通过电子邮件发送的验证码。适配器暂不支持此功能。"
 }

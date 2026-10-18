@@ -25,5 +25,6 @@
     "Test login": "Inloggen testen",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "De accountdienst antwoordde niet. Controleer de internetverbinding van ioBroker en probeer het opnieuw.",
     "The account service refused the login. Log in once in the app, then try again.": "De accountdienst heeft het inloggen geweigerd. Log één keer in via de app en probeer het opnieuw.",
-    "Update interval in minutes": "Update interval in minuten"
+    "Update interval in minutes": "Update interval in minuten",
+    "Your account asks for a code by email at login. The adapter does not support this yet.": "Je account vraagt bij het inloggen om een code per e-mail. De adapter ondersteunt dit nog niet."
 }

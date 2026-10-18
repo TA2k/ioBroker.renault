@@ -25,5 +25,6 @@
     "Test login": "Проверить вход",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "Сервис учётных записей не ответил. Проверьте подключение ioBroker к интернету и повторите попытку.",
     "The account service refused the login. Log in once in the app, then try again.": "Сервис учётных записей отклонил вход. Войдите один раз в приложении и повторите попытку.",
-    "Update interval in minutes": "Интервал обновления в минутах"
+    "Update interval in minutes": "Интервал обновления в минутах",
+    "Your account asks for a code by email at login. The adapter does not support this yet.": "Ваша учётная запись запрашивает при входе код по электронной почте. Адаптер пока это не поддерживает."
 }

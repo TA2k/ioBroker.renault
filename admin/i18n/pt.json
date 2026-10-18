@@ -25,5 +25,6 @@
     "Test login": "Testar login",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "O serviço de conta não respondeu. Verifique a ligação à internet do ioBroker e tente novamente.",
     "The account service refused the login. Log in once in the app, then try again.": "O serviço de conta recusou o login. Inicie sessão uma vez na app e tente novamente.",
-    "Update interval in minutes": "Intervalo de atualização em minutos"
+    "Update interval in minutes": "Intervalo de atualização em minutos",
+    "Your account asks for a code by email at login. The adapter does not support this yet.": "A sua conta pede um código por e-mail no início de sessão. O adaptador ainda não suporta isso."
 }

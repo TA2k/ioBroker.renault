@@ -59,6 +59,9 @@ const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
  * captcha required. Every other error body (server error, temporary lockout) is retried.
  */
 const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
+// Gigya asks for a code sent by email (two-factor authentication); not supported, so no retry either
+const LOGIN_TWO_FACTOR_CODE = 403101;
+const TWO_FACTOR_TEXT = 'The account asks for a code by email at login (two-factor authentication). The adapter does not support this yet';
 const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
 // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
 const GIGYA_API_KEY = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
@@ -387,6 +390,7 @@ class Renault extends utils.Adapter {
     this.polling = false;
     this.startAttempt = 0;
     this.loginRejected = false;
+    this.twoFactorRequired = false;
     this.apiKeyUpdate = BUNDLED_KAMEREON_KEY;
     this.country = 'de';
     this.locale = 'de-DE';
@@ -554,6 +558,10 @@ class Renault extends utils.Adapter {
       this.vehicleListInterval = this.setInterval(() => this.getDeviceList(), DAY_MS);
       return;
     }
+    if (this.twoFactorRequired) {
+      this.log.error(TWO_FACTOR_TEXT + '. Nothing more is tried until the instance is restarted.');
+      return;
+    }
     if (this.loginRejected) {
       this.log.error('Login rejected. Check email and password in the adapter settings, then restart the instance.');
       return;
@@ -677,7 +685,9 @@ class Renault extends utils.Adapter {
     })
       .then((res) => {
         if (res.data.errorMessage) {
-          this.loginRejected = LOGIN_REJECTED_CODES.includes(Number(res.data.errorCode));
+          const errorCode = Number(res.data.errorCode);
+          this.twoFactorRequired = errorCode === LOGIN_TWO_FACTOR_CODE;
+          this.loginRejected = this.twoFactorRequired || LOGIN_REJECTED_CODES.includes(errorCode);
           // only code and message: other fields of the answer can carry the account id
           this.log.error('Login failed: ' + res.data.errorCode + ' ' + res.data.errorMessage);
           return;
@@ -691,6 +701,9 @@ class Renault extends utils.Adapter {
         }
       });
     if (!this.session_data) {
+      if (this.twoFactorRequired) {
+        return false;
+      }
       this.log.error('No session found for this account. Please login in the app. Maybe a new password is needed.');
       return false;
     }
@@ -1746,6 +1759,8 @@ class Renault extends utils.Adapter {
       const data = res?.data ?? {};
       if (data.sessionInfo?.cookieValue) {
         reply({ result: await this.translate(LOGIN_OK_TEXT) });
+      } else if (Number(data.errorCode) === LOGIN_TWO_FACTOR_CODE) {
+        reply({ error: 'twoFactor' });
       } else if (LOGIN_REJECTED_CODES.includes(Number(data.errorCode))) {
         reply({ error: 'rejected' });
       } else {
@@ -1786,7 +1801,9 @@ class Renault extends utils.Adapter {
       // a command would end in a login attempt with the rejected credentials
       await this.reportCommandError(
         vin,
-        path + ': the login was rejected, check email and password and restart the instance. Nothing sent',
+        this.twoFactorRequired
+          ? path + ': ' + TWO_FACTOR_TEXT + '. Nothing sent'
+          : path + ': the login was rejected, check email and password and restart the instance. Nothing sent',
       );
       if (typeof state.val === 'boolean') {
         await this.setState(id, false, true);
