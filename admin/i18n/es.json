@@ -1,4 +1,5 @@
 {
+    "A code was sent to %s. Enter it below and press Confirm code.": "Se envió un código a %s. Introdúzcalo abajo y pulse Confirmar código.",
     "A login test is already running.": "Ya se está ejecutando una prueba de inicio de sesión.",
     "API Key": "Clave API",
     "API Key (leave empty for auto-detect)": "Clave API (déjelo vacío para detección automática)",
@@ -22,9 +23,9 @@
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Número de entradas más recientes que se conservan por endpoint del historial de carga (0 = ilimitado)",
     "Polling": "Sondeo",
     "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app": "Renault / Dacia para la app My Renault y My Dacia, Alpine para la app My Alpine",
+    "Renault has no email address for the login code of this account. Check the account in the app.": "Renault no tiene ninguna dirección de correo electrónico para el código de inicio de sesión de esta cuenta. Compruebe la cuenta en la app.",
     "Test login": "Probar inicio de sesión",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "El servicio de cuentas no respondió. Compruebe la conexión a internet de ioBroker y vuelva a intentarlo.",
     "The account service refused the login. Log in once in the app, then try again.": "El servicio de cuentas rechazó el inicio de sesión. Inicie sesión una vez en la app y vuelva a intentarlo.",
-    "Update interval in minutes": "Intervalo de actualización en minutos",
-    "Your account asks for a code by email at login. The adapter does not support this yet.": "Su cuenta pide un código por correo electrónico al iniciar sesión. El adaptador aún no lo admite."
+    "Update interval in minutes": "Intervalo de actualización en minutos"
 }

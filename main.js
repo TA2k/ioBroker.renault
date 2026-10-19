@@ -59,8 +59,17 @@ const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
  * captcha required. Every other error body (server error, temporary lockout) is retried.
  */
 const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
-// Gigya asks for a code sent by email (two-factor authentication); not supported, so no retry either
+// Gigya asks for a code sent by email (two-factor authentication). A retry cannot help; Test login
+// requests the code and Confirm code in the settings finishes the login
 const LOGIN_TWO_FACTOR_CODE = 403101;
+// completeVerification answers a wrong code with 400006; the challenge stays valid for another try
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by Confirm code
+const TFA_WRONG_CODE = 400006;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by Confirm code
+const TFA_PENDING_MS = 10 * 60 * 1000;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by Confirm code
+const TFA_CODE = /^\d{4,10}$/;
+const TFA_SENT_TEXT = 'A code was sent to %s. Enter it below and press Confirm code.';
 const TWO_FACTOR_TEXT = 'The account asks for a code by email at login (two-factor authentication). The adapter does not support this yet';
 const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
 // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
@@ -364,6 +373,36 @@ function deviceCookie(device) {
   return parts.length ? { Cookie: parts.join('; ') } : {};
 }
 
+/**
+ * The device ids gmid and ucid from the Set-Cookie headers of accounts.webSdkBootstrap.
+ *
+ * @param {unknown} setCookie
+ * @returns {{ gmid?: string, ucid?: string }}
+ */
+function deviceIds(setCookie) {
+  /** @type {{ gmid?: string, ucid?: string }} */
+  const device = {};
+  for (const line of Array.isArray(setCookie) ? setCookie : []) {
+    const match = /^(gmid|ucid)=([^;\s]{1,500})/.exec(String(line));
+    if (match) {
+      device[/** @type {'gmid' | 'ucid'} */ (match[1])] = match[2];
+    }
+  }
+  return device;
+}
+
+/** An answer of Gigya the code challenge cannot use; Test login reports it as "failed". */
+class GigyaError extends Error {
+  /**
+   * @param {string} message method and Gigya code, never a token
+   * @param {number} [gigyaCode]
+   */
+  constructor(message, gigyaCode = 0) {
+    super(message);
+    this.gigyaCode = gigyaCode;
+  }
+}
+
 class Renault extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -428,6 +467,12 @@ class Renault extends utils.Adapter {
     this.unloading = false;
     /** A login test from the settings page is running; a second click waits for it. */
     this.loginTestRunning = false;
+    /**
+     * The code challenge Test login started; only in memory, gone after TFA_PENDING_MS
+     *
+     * @type {{ username: string, password: string, regToken: string, gigyaAssertion: string, phvToken: string, device: { gmid: string, ucid: string }, since: number } | null}
+     */
+    this.pendingTfa = null;
   }
 
   /** APK rI2.smali (WiredHeaderAppVersionInterceptor): build={brand}-android-{version};trId={uuid} on wired Kamereon host */
@@ -1844,9 +1889,9 @@ class Renault extends utils.Adapter {
   }
 
   /**
-   * Answers the "Test login" button of the settings page. Only the Gigya login is tried, with the
-   * values typed into the page, so a wrong email or password shows up before saving. The running
-   * session is not touched, and neither the password nor the answer of the server is logged.
+   * Answers the "Test login" and "Confirm code" buttons of the settings page. Only Gigya is asked,
+   * with the values typed into the page, so a wrong email or password shows up before saving. The
+   * running session is not touched, and neither secrets nor the answers of the server are logged.
    *
    * @param {ioBroker.Message} obj
    */
@@ -1862,41 +1907,138 @@ class Renault extends utils.Adapter {
       reply({ error: 'missing' });
       return;
     }
+    await this.runExclusive(reply, () => this.testLogin(username, password));
+  }
+
+  /**
+   * Run one settings-page action at a time and answer it. A Gigya answer the flow cannot use is
+   * "failed"; anything else thrown (network, timeout) is "unreachable".
+   *
+   * @param {(answer: unknown) => void} reply
+   * @param {() => Promise<{ result: string } | { error: string }>} action
+   */
+  async runExclusive(reply, action) {
     if (this.loginTestRunning) {
       reply({ error: 'busy' });
       return;
     }
     this.loginTestRunning = true;
     try {
-      const res = await this.requestClient({
-        method: 'post',
-        url: 'https://accounts.eu1.gigya.com/accounts.login',
-        headers: {
-          'User-Agent': this.userAgent,
-          Accept: '*/*',
-          'Accept-Language': this.locale.toLowerCase(),
-          'Cache-Control': 'no-cache',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        data: qs.stringify({ apikey: GIGYA_API_KEY, format: 'json', httpStatusCodes: 'false', loginID: username, password }),
-      });
-      const data = res?.data ?? {};
-      if (data.sessionInfo?.cookieValue) {
-        reply({ result: await this.translate(LOGIN_OK_TEXT) });
-      } else if (Number(data.errorCode) === LOGIN_TWO_FACTOR_CODE) {
-        reply({ error: 'twoFactor' });
-      } else if (LOGIN_REJECTED_CODES.includes(Number(data.errorCode))) {
-        reply({ error: 'rejected' });
-      } else {
-        this.log.info('Login test failed: ' + data.errorCode + ' ' + data.errorMessage);
-        reply({ error: 'failed' });
-      }
+      reply(await action());
     } catch (error) {
       this.log.info('Login test failed: ' + /** @type {Error} */ (error).message);
-      reply({ error: 'unreachable' });
+      reply({ error: error instanceof GigyaError ? 'failed' : 'unreachable' });
     } finally {
       this.loginTestRunning = false;
     }
+  }
+
+  /**
+   * Try email and password from the settings page. When Gigya asks for a code, have it emailed.
+   *
+   * @param {string} username
+   * @param {string} password
+   * @returns {Promise<{ result: string } | { error: string }>}
+   */
+  async testLogin(username, password) {
+    this.pendingTfa = null;
+    const stored = await this.readSession(username);
+    const res = await this.requestClient({
+      method: 'post',
+      url: GIGYA_URL + '/accounts.login',
+      headers: { ...this.gigyaHeaders(), ...deviceCookie(stored) },
+      data: qs.stringify({ apikey: GIGYA_API_KEY, format: 'json', httpStatusCodes: 'false', loginID: username, password }),
+    });
+    const data = res?.data ?? {};
+    if (data.sessionInfo?.cookieValue) {
+      return { result: await this.translate(LOGIN_OK_TEXT) };
+    }
+    if (Number(data.errorCode) === LOGIN_TWO_FACTOR_CODE) {
+      return await this.startTwoFactor(username, password, data.regToken, stored);
+    }
+    if (LOGIN_REJECTED_CODES.includes(Number(data.errorCode))) {
+      return { error: 'rejected' };
+    }
+    this.log.info('Login test failed: ' + data.errorCode + ' ' + data.errorMessage);
+    return { error: 'failed' };
+  }
+
+  /**
+   * GET one Gigya method of the code challenge, with the device ids as cookies.
+   *
+   * @param {string} method e.g. accounts.tfa.initTFA
+   * @param {Record<string, string>} params
+   * @param {{ gmid: string, ucid: string }} device
+   * @param {string} [field] answer field that must be a non-empty string
+   * @returns {Promise<Record<string, any>>}
+   */
+  async gigyaGet(method, params, device, field) {
+    const res = await this.requestClient({
+      method: 'get',
+      url: GIGYA_URL + '/' + method,
+      params: { APIKey: GIGYA_API_KEY, format: 'json', ...params },
+      headers: { ...this.gigyaHeaders(), ...deviceCookie(device) },
+    });
+    const data = res?.data ?? {};
+    const errorCode = Number(data.errorCode);
+    if (errorCode) {
+      throw new GigyaError(method + ': ' + errorCode + ' ' + data.errorMessage, errorCode);
+    }
+    if (field && (typeof data[field] !== 'string' || !data[field])) {
+      throw new GigyaError(method + ': no ' + field);
+    }
+    return data;
+  }
+
+  /**
+   * Start the code challenge after Test login got 403101 and have Gigya email the code. What
+   * Confirm code needs stays in memory for TFA_PENDING_MS.
+   *
+   * @param {string} username
+   * @param {string} password
+   * @param {unknown} regToken
+   * @param {{ gmid?: string, ucid?: string } | null} stored device ids of an earlier challenge
+   * @returns {Promise<{ result: string } | { error: string }>}
+   */
+  async startTwoFactor(username, password, regToken, stored) {
+    if (typeof regToken !== 'string' || !regToken) {
+      throw new GigyaError('accounts.login: 403101 without regToken', LOGIN_TWO_FACTOR_CODE);
+    }
+    let device = stored?.gmid && stored.ucid ? { gmid: stored.gmid, ucid: stored.ucid } : null;
+    if (!device) {
+      const res = await this.requestClient({
+        method: 'get',
+        url: GIGYA_URL + '/accounts.webSdkBootstrap',
+        params: { APIKey: GIGYA_API_KEY },
+        headers: this.gigyaHeaders(),
+      });
+      const ids = deviceIds(res?.headers?.['set-cookie']);
+      if (!ids.gmid || !ids.ucid) {
+        throw new GigyaError('accounts.webSdkBootstrap: no device ids');
+      }
+      device = { gmid: ids.gmid, ucid: ids.ucid };
+    }
+    const { gigyaAssertion } = await this.gigyaGet(
+      'accounts.tfa.initTFA',
+      { regToken, provider: 'gigyaEmail', mode: 'verify', ...device },
+      device,
+      'gigyaAssertion',
+    );
+    const { emails } = await this.gigyaGet('accounts.tfa.email.getEmails', { gigyaAssertion }, device);
+    // Known limit: with several addresses for the code, the first one is used
+    const email = Array.isArray(emails) ? emails.find((entry) => typeof entry?.id === 'string' && entry.id) : undefined;
+    if (!email) {
+      return { error: 'noEmail' };
+    }
+    const { phvToken } = await this.gigyaGet(
+      'accounts.tfa.email.sendVerificationCode',
+      { gigyaAssertion, emailID: email.id, lang: this.locale.slice(0, 2) },
+      device,
+      'phvToken',
+    );
+    this.pendingTfa = { username, password, regToken, gigyaAssertion, phvToken, device, since: Date.now() };
+    const address = typeof email.obfuscated === 'string' ? email.obfuscated.slice(0, 100) : '?';
+    return { result: (await this.translate(TFA_SENT_TEXT)).replace('%s', address) };
   }
 
   /**

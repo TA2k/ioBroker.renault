@@ -1,4 +1,5 @@
 {
+    "A code was sent to %s. Enter it below and press Confirm code.": "Код надіслано на адресу %s. Введіть його нижче й натисніть «Підтвердити код».",
     "A login test is already running.": "Перевірка входу вже виконується.",
     "API Key": "API ключ",
     "API Key (leave empty for auto-detect)": "API ключ (залиште порожнім для автовизначення)",
@@ -22,9 +23,9 @@
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Кількість останніх записів, що зберігаються для кожного ендпоінта історії заряджання (0 = без обмежень)",
     "Polling": "Опитування",
     "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app": "Renault / Dacia для застосунку My Renault і My Dacia, Alpine для застосунку My Alpine",
+    "Renault has no email address for the login code of this account. Check the account in the app.": "У Renault немає адреси електронної пошти для коду входу цього облікового запису. Перевірте обліковий запис у застосунку.",
     "Test login": "Перевірити вхід",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "Сервіс облікових записів не відповів. Перевірте підключення ioBroker до інтернету й спробуйте ще раз.",
     "The account service refused the login. Log in once in the app, then try again.": "Сервіс облікових записів відхилив вхід. Увійдіть один раз у застосунку й спробуйте ще раз.",
-    "Update interval in minutes": "Інтервал оновлення в хвилинах",
-    "Your account asks for a code by email at login. The adapter does not support this yet.": "Ваш обліковий запис вимагає під час входу код електронною поштою. Адаптер поки цього не підтримує."
+    "Update interval in minutes": "Інтервал оновлення в хвилинах"
 }

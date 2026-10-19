@@ -2,7 +2,7 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { createTestAdapter, httpError, ACCOUNT, VEHICLE } = require('./test/fakeAdapter');
+const { createTestAdapter, httpError, withHeaders, ACCOUNT, VEHICLE } = require('./test/fakeAdapter');
 const createRenault = require('./main.js');
 
 const setup = createTestAdapter;
@@ -75,13 +75,6 @@ describe('login test from the settings page', () => {
     expect(answer(adapter)).to.deep.equal({ error: 'rejected' });
     const all = [...logged(adapter.log.info), ...logged(adapter.log.warn), ...logged(adapter.log.error), ...logged(adapter.log.debug)];
     expect(all.join(' ')).to.not.include('wrong-pass');
-  });
-
-  it('reports a login that needs a code by email', async () => {
-    const adapter = setup({ 'accounts.login': { errorCode: 403101, errorMessage: 'Account Pending TFA Verification', regToken: 'R' } });
-    await ask(adapter, { username: 'a@b.c', password: 'x' });
-    expect(answer(adapter)).to.deep.equal({ error: 'twoFactor' });
-    expect(require('./admin/jsonConfig.json').items._testLogin.error.twoFactor).to.be.a('string');
   });
 
   // admin evaluates jsonData as a template literal; for a bare `${data.x}` admin 7 escapes only
@@ -175,6 +168,119 @@ describe('login test from the settings page', () => {
     await ask(adapter, { username: 'other@example.com', password: 'other' });
     expect(adapter.session).to.equal(session);
     expect(adapter.states['info.connection']).to.equal(connection);
+  });
+});
+
+describe('login code', () => {
+  /**
+   * @param {any} adapter
+   * @param {unknown} message
+   * @param {string} [command]
+   */
+  function ask(adapter, message, command = 'testLogin') {
+    return adapter.onMessage(
+      /** @type {ioBroker.Message} */ (/** @type {unknown} */ ({ command, message, from: 'system.adapter.admin.0', callback: { id: 1 } })),
+    );
+  }
+  const answer = (adapter) => adapter.sendTo.lastCall?.args[2];
+  const calls = (adapter, method) => adapter.requestClient.getCalls().filter((call) => call.args[0].url.endsWith('/' + method));
+  const TWO_FACTOR = { errorCode: 403101, errorMessage: 'Account Pending TFA Verification', regToken: 'REG1' };
+  const SENT = 'A code was sent to u***@example.com. Enter it below and press Confirm code.';
+
+  /** Fresh routes per test: Gigya asks for a code until finalizeTFA ran, then accepts the device. */
+  function tfaRoutes(routes = {}) {
+    let finalized = false;
+    return {
+      'accounts.login': (request) =>
+        finalized && request.headers?.Cookie === 'gmid=GMID1; ucid=UCID1' ? { sessionInfo: { cookieValue: 'TFA_TOKEN' } } : TWO_FACTOR,
+      'accounts.webSdkBootstrap': withHeaders(
+        { errorCode: 0 },
+        { 'set-cookie': ['gmid=GMID1; Path=/; Secure', 'ucid=UCID1; Path=/', 'hasGmid=ver4; Path=/'] },
+      ),
+      'accounts.tfa.initTFA': { errorCode: 0, gigyaAssertion: 'ASSERT1' },
+      'accounts.tfa.email.getEmails': { errorCode: 0, emails: [{ id: 'MAIL1', obfuscated: 'u***@example.com' }] },
+      'accounts.tfa.email.sendVerificationCode': { errorCode: 0, phvToken: 'PHV1' },
+      'accounts.tfa.email.completeVerification': { errorCode: 0, providerAssertion: 'PROVIDER1' },
+      'accounts.tfa.finalizeTFA': () => {
+        finalized = true;
+        return { errorCode: 0 };
+      },
+      ...routes,
+    };
+  }
+
+  it('sends a code and names the address when the login needs one', async () => {
+    const adapter = setup(tfaRoutes());
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({ result: SENT });
+    const init = calls(adapter, 'accounts.tfa.initTFA')[0].args[0];
+    expect(init.params).to.include({ regToken: 'REG1', provider: 'gigyaEmail', mode: 'verify', gmid: 'GMID1', ucid: 'UCID1' });
+    expect(init.headers.Cookie).to.equal('gmid=GMID1; ucid=UCID1');
+    const send = calls(adapter, 'accounts.tfa.email.sendVerificationCode')[0].args[0];
+    expect(send.params).to.include({ gigyaAssertion: 'ASSERT1', emailID: 'MAIL1', lang: 'de' });
+    expect(send.headers.Cookie).to.equal('gmid=GMID1; ucid=UCID1');
+  });
+
+  it('names the address in the system language', async () => {
+    const adapter = setup(tfaRoutes());
+    adapter.getForeignObjectAsync = sinon.stub().resolves({ common: { language: 'de' } });
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({
+      result: 'Ein Code wurde an u***@example.com gesendet. Unten eingeben und Code bestätigen drücken.',
+    });
+  });
+
+  it('uses the device ids stored for this email instead of new ones', async () => {
+    const adapter = setup(tfaRoutes());
+    adapter.states['info.session'] = adapter.encrypt(JSON.stringify({ username: 'a@b.c', gmid: 'G0', ucid: 'U0' }));
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(calls(adapter, 'accounts.webSdkBootstrap')).to.deep.equal([]);
+    expect(calls(adapter, 'accounts.login')[0].args[0].headers.Cookie).to.equal('gmid=G0; ucid=U0');
+    expect(calls(adapter, 'accounts.tfa.initTFA')[0].args[0].params).to.include({ gmid: 'G0', ucid: 'U0' });
+  });
+
+  for (const emails of [[], [{ obfuscated: 'x***@y.z' }], [{ id: '', obfuscated: 'x' }], 'MAIL1', undefined]) {
+    it(`reports an account without an address for the code (${JSON.stringify(emails)})`, async () => {
+      const adapter = setup(tfaRoutes({ 'accounts.tfa.email.getEmails': { errorCode: 0, emails } }));
+      await ask(adapter, { username: 'a@b.c', password: 'x' });
+      expect(answer(adapter)).to.deep.equal({ error: 'noEmail' });
+      expect(calls(adapter, 'accounts.tfa.email.sendVerificationCode')).to.deep.equal([]);
+    });
+  }
+
+  it('takes the first usable address', async () => {
+    const adapter = setup(
+      tfaRoutes({
+        'accounts.tfa.email.getEmails': {
+          errorCode: 0,
+          emails: [{ obfuscated: 'no id' }, { id: 'MAIL2', obfuscated: 'b***@c.d' }, { id: 'MAIL3' }],
+        },
+      }),
+    );
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(calls(adapter, 'accounts.tfa.email.sendVerificationCode')[0].args[0].params.emailID).to.equal('MAIL2');
+  });
+
+  for (const [name, routes] of [
+    ['403101 without regToken', { 'accounts.login': { ...TWO_FACTOR, regToken: undefined } }],
+    ['no device ids from webSdkBootstrap', { 'accounts.webSdkBootstrap': withHeaders({}, {}) }],
+    ['initTFA refused', { 'accounts.tfa.initTFA': { errorCode: 403007, errorMessage: 'Permission denied' } }],
+    ['initTFA without assertion', { 'accounts.tfa.initTFA': { errorCode: 0 } }],
+    ['getEmails refused', { 'accounts.tfa.email.getEmails': { errorCode: 400006, errorMessage: 'Invalid parameter value' } }],
+    ['sendVerificationCode without phvToken', { 'accounts.tfa.email.sendVerificationCode': { errorCode: 0 } }],
+  ]) {
+    it(`answers failed when ${name}`, async () => {
+      const adapter = setup(tfaRoutes(routes));
+      await ask(adapter, { username: 'a@b.c', password: 'x' });
+      expect(answer(adapter)).to.deep.equal({ error: 'failed' });
+      expect(adapter.pendingTfa).to.equal(null);
+    });
+  }
+
+  it('answers unreachable when a step of the code request gets no answer', async () => {
+    const adapter = setup(tfaRoutes({ 'accounts.tfa.email.sendVerificationCode': new Error('ECONNRESET') }));
+    await ask(adapter, { username: 'a@b.c', password: 'x' });
+    expect(answer(adapter)).to.deep.equal({ error: 'unreachable' });
   });
 });
 

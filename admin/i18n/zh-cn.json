@@ -1,4 +1,5 @@
 {
+    "A code was sent to %s. Enter it below and press Confirm code.": "验证码已发送至 %s。请在下方输入并点击“确认验证码”。",
     "A login test is already running.": "登录测试已在运行。",
     "API Key": "API 密钥",
     "API Key (leave empty for auto-detect)": "API 密钥（留空自动检测）",
@@ -22,9 +23,9 @@
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "每个充电历史接口保留的最新记录条数（0 = 不限制）",
     "Polling": "轮询",
     "Renault / Dacia for the My Renault and My Dacia app, Alpine for the My Alpine app": "Renault / Dacia 对应 My Renault 和 My Dacia 应用，Alpine 对应 My Alpine 应用",
+    "Renault has no email address for the login code of this account. Check the account in the app.": "Renault 没有此账户用于登录验证码的电子邮件地址。请在应用中检查该账户。",
     "Test login": "测试登录",
     "The account service did not answer. Check the internet connection of ioBroker and try again.": "账户服务没有响应。请检查 ioBroker 的互联网连接后重试。",
     "The account service refused the login. Log in once in the app, then try again.": "账户服务拒绝了登录。请先在应用中登录一次，然后重试。",
-    "Update interval in minutes": "更新间隔（分钟）",
-    "Your account asks for a code by email at login. The adapter does not support this yet.": "您的账户在登录时要求输入通过电子邮件发送的验证码。适配器暂不支持此功能。"
+    "Update interval in minutes": "更新间隔（分钟）"
 }

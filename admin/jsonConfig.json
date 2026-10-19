@@ -178,14 +178,14 @@
       "icon": "auth",
       "variant": "outlined",
       "showProcess": true,
-      "timeout": 35000,
+      "timeout": 60000,
       "error": {
         "missing": "Enter email and password first.",
         "rejected": "Email or password is wrong. Use the same login as in the app.",
         "failed": "The account service refused the login. Log in once in the app, then try again.",
         "unreachable": "The account service did not answer. Check the internet connection of ioBroker and try again.",
         "busy": "A login test is already running.",
-        "twoFactor": "Your account asks for a code by email at login. The adapter does not support this yet."
+        "noEmail": "Renault has no email address for the login code of this account. Check the account in the app."
       },
       "newLine": true,
       "xs": 12,
