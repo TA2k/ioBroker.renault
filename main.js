@@ -606,6 +606,8 @@ class Renault extends utils.Adapter {
   async connectAndPoll() {
     if ((await this.login()) && (await this.getDeviceList())) {
       this.startAttempt = 0;
+      this.twoFactorRequired = false;
+      this.loginRejected = false;
       await this.migrateChargeHistoryV1();
       await this.loadCockpitChoice();
       // a failed first poll must not skip the intervals below; the next poll is already scheduled
@@ -2109,6 +2111,7 @@ class Renault extends utils.Adapter {
       throw new GigyaError('accounts.login after the code: ' + errorCode + ' ' + res?.data?.errorMessage, errorCode);
     }
     this.pendingTfa = null;
+    // Known limit: there is one session slot. A code confirmed for another email than the configured one replaces the stored session of the configured account.
     await this.writeSession({ username: pending.username, loginToken, ...device });
     if (this.twoFactorRequired && pending.username.toLowerCase() === String(this.config.username ?? '').toLowerCase()) {
       this.twoFactorRequired = false;

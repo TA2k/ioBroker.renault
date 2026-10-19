@@ -333,6 +333,19 @@ describe('login code', () => {
     expect(adapter.registerNotification.callCount).to.equal(1);
   });
 
+  it('keeps the stop and stores the session when the code is for another email', async () => {
+    const adapter = setup(tfaRoutes());
+    await adapter.onReady();
+    const timers = adapter.timeouts.length;
+    await ask(adapter, { username: 'other@example.com', password: 'x' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
+    expect(adapter.timeouts).to.have.length(timers);
+    expect(adapter.twoFactorRequired).to.equal(true);
+    expect(adapter.loginRejected).to.equal(true);
+    expect(read(adapter)).to.deep.equal({ username: 'other@example.com', loginToken: 'TFA_TOKEN', gmid: 'GMID1', ucid: 'UCID1' });
+  });
+
   it('accepts a code with spaces around it', async () => {
     const adapter = await codeSent();
     await ask(adapter, { code: ' 123456 ' }, 'tfaConfirm');
@@ -1577,6 +1590,18 @@ describe('relogin', () => {
     await adapter.onStateChange('renault.0.VIN1.remote.climateTemperature', userWrite(19));
     expect(adapter.states['VIN1.remote.climateTemperature']).to.equal(19);
     expect(adapter.acks['VIN1.remote.climateTemperature']).to.equal(true);
+  });
+
+  it('clears the login flags after a successful connect, so commands are sent again', async () => {
+    const adapter = await connected();
+    adapter.loginRejected = true;
+    adapter.twoFactorRequired = true;
+    await adapter.connectAndPoll();
+    expect(adapter.loginRejected).to.equal(false);
+    expect(adapter.twoFactorRequired).to.equal(false);
+    adapter.requestClient.resetHistory();
+    await adapter.onStateChange('renault.0.VIN1.remote.climateStart', userWrite(true));
+    expect(adapter.requestClient.getCalls().filter((call) => call.args[0].method === 'post')).to.have.length(1);
   });
 
   it('runs exactly one poll timer and one refresh interval after a successful relogin', async () => {
