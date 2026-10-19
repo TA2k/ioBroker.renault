@@ -7,7 +7,7 @@
     "App Password": "App Wachtwoord",
     "Brand": "Merk",
     "Charge history entries to keep": "Te bewaren items van de laadgeschiedenis",
-    "Checks email and password with the values on this page, without saving": "Controleert e-mail en wachtwoord met de waarden op deze pagina, zonder op te slaan",
+    "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.": "Controleert e-mail en wachtwoord met de waarden op deze pagina, zonder op te slaan. Als Renault een code vraagt, wordt die per e-mail verstuurd.",
     "Click here for current API Key": "Klik hier voor de huidige API-sleutel",
     "Code from the email": "Code uit de e-mail",
     "Confirm code": "Code bevestigen",

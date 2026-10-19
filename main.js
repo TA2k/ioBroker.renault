@@ -732,6 +732,27 @@ class Renault extends utils.Adapter {
   }
 
   /**
+   * Ask Gigya for an id token with a login token.
+   *
+   * @param {string} loginToken
+   */
+  requestJwt(loginToken) {
+    return this.requestClient({
+      method: 'post',
+      url: GIGYA_URL + '/accounts.getJWT',
+      headers: this.gigyaHeaders(),
+      data: qs.stringify({
+        format: 'json',
+        login_token: loginToken,
+        sdk: 'js_latest',
+        fields: 'data.personId,data.gigyaDataCenter',
+        apikey: this.apiKey,
+        expiration: '3600',
+      }),
+    });
+  }
+
+  /**
    * The login session an earlier run stored for this email. A missing, foreign or broken value
    * returns null and only means a password login.
    *
@@ -776,20 +797,7 @@ class Renault extends utils.Adapter {
   async resumeSession(stored) {
     let data;
     try {
-      const res = await this.requestClient({
-        method: 'post',
-        url: GIGYA_URL + '/accounts.getJWT',
-        headers: this.gigyaHeaders(),
-        data: qs.stringify({
-          format: 'json',
-          login_token: stored.loginToken,
-          sdk: 'js_latest',
-          fields: 'data.personId,data.gigyaDataCenter',
-          apikey: this.apiKey,
-          expiration: '3600',
-        }),
-      });
-      data = res.data;
+      data = (await this.requestJwt(/** @type {string} */ (stored.loginToken))).data;
     } catch (error) {
       this.log.warn('Login with the stored session failed: ' + /** @type {Error} */ (error).message);
       return 'failed';
@@ -877,19 +885,7 @@ class Renault extends utils.Adapter {
       });
     }
     this.session = {};
-    await this.requestClient({
-      method: 'post',
-      url: GIGYA_URL + '/accounts.getJWT',
-      headers: this.gigyaHeaders(),
-      data: qs.stringify({
-        format: 'json',
-        login_token: this.session_data.cookieValue,
-        sdk: 'js_latest',
-        fields: 'data.personId,data.gigyaDataCenter',
-        apikey: this.apiKey,
-        expiration: '3600',
-      }),
-    })
+    await this.requestJwt(this.session_data.cookieValue)
       .then((res) => {
         this.session = res.data;
       })
@@ -1789,25 +1785,7 @@ class Renault extends utils.Adapter {
       return false;
     }
     try {
-      const res = await this.requestClient({
-        method: 'post',
-        url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
-        headers: {
-          'User-Agent': this.userAgent,
-          Accept: '*/*',
-          'Accept-Language': this.locale.toLowerCase(),
-          'Cache-Control': 'no-cache',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        data: qs.stringify({
-          format: 'json',
-          login_token: this.session_data.cookieValue,
-          sdk: 'js_latest',
-          fields: 'data.personId,data.gigyaDataCenter',
-          apikey: this.apiKey,
-          expiration: '3600',
-        }),
-      });
+      const res = await this.requestJwt(this.session_data.cookieValue);
       // Gigya answers 200 with an errorCode body when the session is no longer valid.
       if (!res.data?.id_token) {
         throw new Error('no id token in the answer' + (res.data?.errorCode ? ' (error ' + res.data.errorCode + ')' : ''));
@@ -1897,7 +1875,8 @@ class Renault extends utils.Adapter {
   /**
    * Answers the "Test login" and "Confirm code" buttons of the settings page. Only Gigya is asked,
    * with the values typed into the page, so a wrong email or password shows up before saving. The
-   * running session is not touched, and neither secrets nor the answers of the server are logged.
+   * running session is left alone by Test login. Confirm code stores a new session and reconnects when
+   * the instance stopped because of the code. Neither secrets nor the answers of the server are logged.
    *
    * @param {ioBroker.Message} obj
    */

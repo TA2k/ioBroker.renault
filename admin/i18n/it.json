@@ -7,7 +7,7 @@
     "App Password": "Password dell'app",
     "Brand": "Marchio",
     "Charge history entries to keep": "Voci della cronologia di ricarica da conservare",
-    "Checks email and password with the values on this page, without saving": "Verifica e-mail e password con i valori di questa pagina, senza salvare",
+    "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.": "Verifica e-mail e password con i valori di questa pagina, senza salvare. Se Renault chiede un codice, viene inviato via e-mail.",
     "Click here for current API Key": "Fai clic qui per la chiave API attuale",
     "Code from the email": "Codice dell'e-mail",
     "Confirm code": "Conferma codice",

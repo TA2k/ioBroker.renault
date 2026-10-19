@@ -7,7 +7,7 @@
     "App Password": "App Passwort",
     "Brand": "Marke",
     "Charge history entries to keep": "Aufzubewahrende Einträge der Ladehistorie",
-    "Checks email and password with the values on this page, without saving": "Prüft E-Mail und Passwort mit den Werten auf dieser Seite, ohne zu speichern",
+    "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.": "Prüft E-Mail und Passwort mit den Werten auf dieser Seite, ohne zu speichern. Wenn Renault einen Code verlangt, wird er per E-Mail gesendet.",
     "Click here for current API Key": "Hier klicken für aktuellen API-Schlüssel",
     "Code from the email": "Code aus der E-Mail",
     "Confirm code": "Code bestätigen",

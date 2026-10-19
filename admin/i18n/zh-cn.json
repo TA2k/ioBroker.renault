@@ -7,7 +7,7 @@
     "App Password": "应用密码",
     "Brand": "品牌",
     "Charge history entries to keep": "保留的充电历史记录条数",
-    "Checks email and password with the values on this page, without saving": "使用本页上的值检查电子邮件和密码，不保存",
+    "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.": "使用本页上的值检查电子邮件和密码，不保存。如果雷诺要求验证码，会通过电子邮件发送。",
     "Click here for current API Key": "点击此处获取当前 API 密钥",
     "Code from the email": "邮件中的验证码",
     "Confirm code": "确认验证码",

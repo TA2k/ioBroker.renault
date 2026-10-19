@@ -172,7 +172,7 @@
     "_testLogin": {
       "type": "sendTo",
       "label": "Test login",
-      "help": "Checks email and password with the values on this page, without saving",
+      "help": "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.",
       "command": "testLogin",
       "jsonData": "{\"username\": ${JSON.stringify(data.username ?? \"\")}, \"password\": ${JSON.stringify(data.password ?? \"\")}}",
       "icon": "auth",

@@ -7,7 +7,7 @@
     "App Password": "App Password",
     "Brand": "Brand",
     "Charge history entries to keep": "Charge history entries to keep",
-    "Checks email and password with the values on this page, without saving": "Checks email and password with the values on this page, without saving",
+    "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.": "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.",
     "Click here for current API Key": "Click here for current API Key",
     "Code from the email": "Code from the email",
     "Confirm code": "Confirm code",

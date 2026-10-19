@@ -167,8 +167,8 @@ Until then the adapter sends no commands, so it cannot lock the account with the
 **The log or the admin notifications say Renault asks for a code by email.** Renault asks some
 accounts for a code sent by email at login (two-factor authentication). Open the instance
 settings and press **Test login**. The adapter has Renault send the code and names the address.
-Enter the code in **Code from the email** within 10 minutes and press **Confirm code**. The
-adapter then connects by itself. Renault remembers the ioBroker installation for about 30 days,
+Enter the code in **Code from the email** within 10 minutes and press **Confirm code**. If the 10 minutes have passed,
+press **Test login** again for a new code. The adapter then connects by itself. Renault remembers the ioBroker installation for about 30 days,
 and the adapter keeps its login session across restarts, so a new code is needed only when
 Renault ends that session. A wrong code can be corrected without a new email.
 

@@ -7,7 +7,7 @@
     "App Password": "Пароль приложения",
     "Brand": "Марка",
     "Charge history entries to keep": "Сохраняемые записи истории зарядки",
-    "Checks email and password with the values on this page, without saving": "Проверяет e-mail и пароль по значениям на этой странице без сохранения",
+    "Checks email and password with the values on this page, without saving. If Renault asks for a code, it is sent by email.": "Проверяет e-mail и пароль по значениям на этой странице без сохранения. Если Renault запрашивает код, он отправляется по электронной почте.",
     "Click here for current API Key": "Нажмите здесь для получения текущего API ключа",
     "Code from the email": "Код из письма",
     "Confirm code": "Подтвердить код",
