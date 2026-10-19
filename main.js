@@ -65,6 +65,7 @@ const TWO_FACTOR_TEXT = 'The account asks for a code by email at login (two-fact
 const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
 // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
 const GIGYA_API_KEY = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
+const GIGYA_URL = 'https://accounts.eu1.gigya.com';
 const QUOTA_PAUSE_MINUTES = [15, 30, 60];
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -344,6 +345,23 @@ function isQuotaError(error) {
  */
 function isValidTemperature(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Cookie header with the Gigya device ids. With them Gigya recognises a device that confirmed a
+ * login code and does not ask again for about 30 days.
+ *
+ * @param {{ gmid?: string, ucid?: string } | null | undefined} device
+ * @returns {Record<string, string>}
+ */
+function deviceCookie(device) {
+  const parts = [];
+  for (const name of /** @type {const} */ (['gmid', 'ucid'])) {
+    if (device?.[name]) {
+      parts.push(name + '=' + device[name]);
+    }
+  }
+  return parts.length ? { Cookie: parts.join('; ') } : {};
 }
 
 class Renault extends utils.Adapter {
@@ -653,6 +671,98 @@ class Renault extends utils.Adapter {
     }
   }
 
+  /** Headers of every Gigya request, as the app sends them. */
+  gigyaHeaders() {
+    return {
+      'User-Agent': this.userAgent,
+      Accept: '*/*',
+      'Accept-Language': this.locale.toLowerCase(),
+      'Cache-Control': 'no-cache',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+  }
+
+  /**
+   * The login session an earlier run stored for this email. A missing, foreign or broken value
+   * returns null and only means a password login.
+   *
+   * @param {string} username
+   * @returns {Promise<{ loginToken?: string, gmid?: string, ucid?: string } | null>}
+   */
+  async readSession(username) {
+    try {
+      const state = await this.getStateAsync('info.session');
+      if (typeof state?.val !== 'string' || !state.val) {
+        return null;
+      }
+      const stored = JSON.parse(this.decrypt(state.val));
+      if (typeof stored?.username !== 'string' || stored.username.toLowerCase() !== username.toLowerCase()) {
+        return null;
+      }
+      /** @param {unknown} value */
+      const text = (value) => (typeof value === 'string' && value ? value : undefined);
+      return { loginToken: text(stored.loginToken), gmid: text(stored.gmid), ucid: text(stored.ucid) };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Store the login session encrypted with the system secret, so a restart needs no password login.
+   *
+   * @param {{ username: string, loginToken?: string, gmid?: string, ucid?: string }} session
+   */
+  async writeSession(session) {
+    await this.setState('info.session', this.encrypt(JSON.stringify(session)), true);
+  }
+
+  /**
+   * Get an id token with the login token of an earlier run, without the password.
+   *
+   * @param {{ loginToken?: string, gmid?: string, ucid?: string }} stored
+   * @returns {Promise<'ok' | 'invalid' | 'failed'>} invalid: Gigya rejected the token and the
+   *   password login follows; failed: no answer or a Gigya server error, the token is kept and
+   *   connectAndPoll() backs off
+   */
+  async resumeSession(stored) {
+    let data;
+    try {
+      const res = await this.requestClient({
+        method: 'post',
+        url: GIGYA_URL + '/accounts.getJWT',
+        headers: this.gigyaHeaders(),
+        data: qs.stringify({
+          format: 'json',
+          login_token: stored.loginToken,
+          sdk: 'js_latest',
+          fields: 'data.personId,data.gigyaDataCenter',
+          apikey: this.apiKey,
+          expiration: '3600',
+        }),
+      });
+      data = res.data;
+    } catch (error) {
+      this.log.warn('Login with the stored session failed: ' + /** @type {Error} */ (error).message);
+      return 'failed';
+    }
+    if (data?.id_token) {
+      this.session_data = { cookieValue: stored.loginToken };
+      this.session = data;
+      this.log.debug('Logged in with the stored session, without the password');
+      return 'ok';
+    }
+    const errorCode = Number(data?.errorCode);
+    if (errorCode >= 500000) {
+      this.log.warn('Login with the stored session failed: Gigya error ' + errorCode);
+      return 'failed';
+    }
+    this.log.info(
+      'The stored session is no longer valid' + (errorCode ? ' (error ' + errorCode + ')' : '') + ', logging in with the password',
+    );
+    await this.writeSession({ username: this.config.username, gmid: stored.gmid, ucid: stored.ucid });
+    return 'invalid';
+  }
+
   /**
    * Log in and look up the account. Sets info.connection accordingly.
    *
@@ -664,17 +774,17 @@ class Renault extends utils.Adapter {
     return ok;
   }
 
-  async loginSteps() {
+  /**
+   * Log in with email and password, store the new login token and get an id token.
+   *
+   * @param {{ gmid?: string, ucid?: string } | null} stored device ids of an earlier code challenge
+   * @returns {Promise<boolean>} true when session and id token are available
+   */
+  async passwordLogin(stored) {
     this.session_data = await this.requestClient({
       method: 'post',
-      url: 'https://accounts.eu1.gigya.com/accounts.login',
-      headers: {
-        'User-Agent': this.userAgent,
-        Accept: '*/*',
-        'Accept-Language': this.locale.toLowerCase(),
-        'Cache-Control': 'no-cache',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      url: GIGYA_URL + '/accounts.login',
+      headers: { ...this.gigyaHeaders(), ...deviceCookie(stored) },
       data: qs.stringify({
         apikey: this.apiKey,
         format: 'json',
@@ -707,17 +817,19 @@ class Renault extends utils.Adapter {
       this.log.error('No session found for this account. Please login in the app. Maybe a new password is needed.');
       return false;
     }
+    if (typeof this.session_data.cookieValue === 'string' && this.session_data.cookieValue) {
+      await this.writeSession({
+        username: this.config.username,
+        loginToken: this.session_data.cookieValue,
+        gmid: stored?.gmid,
+        ucid: stored?.ucid,
+      });
+    }
     this.session = {};
     await this.requestClient({
       method: 'post',
-      url: 'https://accounts.eu1.gigya.com/accounts.getJWT',
-      headers: {
-        'User-Agent': this.userAgent,
-        Accept: '*/*',
-        'Accept-Language': this.locale.toLowerCase(),
-        'Cache-Control': 'no-cache',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      url: GIGYA_URL + '/accounts.getJWT',
+      headers: this.gigyaHeaders(),
       data: qs.stringify({
         format: 'json',
         login_token: this.session_data.cookieValue,
@@ -737,6 +849,18 @@ class Renault extends utils.Adapter {
         }
       });
     if (!this.session.id_token) {
+      return false;
+    }
+    return true;
+  }
+
+  async loginSteps() {
+    const stored = await this.readSession(this.config.username);
+    const resumed = stored?.loginToken ? await this.resumeSession(stored) : 'invalid';
+    if (resumed === 'failed') {
+      return false;
+    }
+    if (resumed === 'invalid' && !(await this.passwordLogin(stored))) {
       return false;
     }
     return await this.requestClient({

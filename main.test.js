@@ -982,14 +982,147 @@ describe('request quota', () => {
   });
 });
 
+describe('stored session', () => {
+  const store = (adapter, session) => {
+    adapter.states['info.session'] = adapter.encrypt(JSON.stringify(session));
+  };
+  const read = (adapter) => JSON.parse(adapter.decrypt(adapter.states['info.session']));
+  const logins = (adapter) => adapter.requestClient.getCalls().filter((call) => call.args[0].url.includes('accounts.login'));
+  const jwtTokens = (adapter) =>
+    adapter.requestClient
+      .getCalls()
+      .filter((call) => call.args[0].url.includes('accounts.getJWT'))
+      .map((call) => new URLSearchParams(call.args[0].data).get('login_token'));
+  /** @param {any} adapter */
+  const allLines = (adapter) =>
+    Object.values(adapter.log).flatMap((spy) => spy.getCalls().map((call) => require('node:util').inspect(call.args[0])));
+
+  it('stores the login token encrypted after a password login', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    expect(adapter.states['info.session']).to.be.a('string').and.not.include('COOKIE');
+    expect(read(adapter)).to.deep.equal({ username: 'user@example.com', loginToken: 'COOKIE' });
+  });
+
+  for (const username of ['user@example.com', 'USER@Example.com']) {
+    it(`logs in with the token stored for ${username}, without the password`, async () => {
+      const adapter = setup();
+      store(adapter, { username, loginToken: 'STORED' });
+      await adapter.onReady();
+      expect(logins(adapter)).to.deep.equal([]);
+      expect(jwtTokens(adapter)).to.deep.equal(['STORED']);
+      expect(adapter.session_data.cookieValue).to.equal('STORED');
+      expect(adapter.states['info.connection']).to.equal(true);
+      expect(logged(adapter.log.debug)).to.include('Logged in with the stored session, without the password');
+    });
+  }
+
+  it('falls back to the password when Gigya rejects the stored token, and keeps the device ids', async () => {
+    const adapter = setup({
+      'accounts.getJWT': (request) =>
+        String(request.data).includes('login_token=STORED&')
+          ? { errorCode: 403005, errorMessage: 'Unauthorized user' }
+          : { id_token: 'ID_TOKEN' },
+    });
+    store(adapter, { username: 'user@example.com', loginToken: 'STORED', gmid: 'G1', ucid: 'U1' });
+    await adapter.onReady();
+    expect(logins(adapter)).to.have.length(1);
+    expect(read(adapter)).to.deep.equal({ username: 'user@example.com', loginToken: 'COOKIE', gmid: 'G1', ucid: 'U1' });
+    expect(adapter.states['info.connection']).to.equal(true);
+  });
+
+  for (const [name, failure] of [
+    ['HTTP 500', httpError(500)],
+    ['a network error', new Error('ECONNRESET')],
+    ['a Gigya server error', { errorCode: 500001, errorMessage: 'General Server Error' }],
+  ]) {
+    it(`keeps the stored token and backs off on ${name}`, async () => {
+      const adapter = setup({ 'accounts.getJWT': failure });
+      store(adapter, { username: 'user@example.com', loginToken: 'STORED' });
+      await adapter.onReady();
+      expect(logins(adapter)).to.deep.equal([]);
+      expect(read(adapter).loginToken).to.equal('STORED');
+      expect(adapter.timeouts.at(-1)?.ms).to.equal(5 * 60 * 1000);
+      expect(adapter.states['info.connection']).to.equal(false);
+    });
+  }
+
+  it('ignores the session of another email', async () => {
+    const adapter = setup();
+    store(adapter, { username: 'other@example.com', loginToken: 'STORED', gmid: 'G1', ucid: 'U1' });
+    await adapter.onReady();
+    expect(logins(adapter)).to.have.length(1);
+    expect(logins(adapter)[0].args[0].headers.Cookie).to.equal(undefined);
+    expect(read(adapter)).to.deep.equal({ username: 'user@example.com', loginToken: 'COOKIE' });
+  });
+
+  for (const value of [
+    '',
+    'not encrypted',
+    'enc:' + Buffer.from('{broken').toString('base64'),
+    'enc:' + Buffer.from('null').toString('base64'),
+    'enc:' + Buffer.from('42').toString('base64'),
+    'enc:' + Buffer.from('{"username":42,"loginToken":"STORED"}').toString('base64'),
+    'enc:' + Buffer.from('{"username":"user@example.com","loginToken":42}').toString('base64'),
+    42,
+    null,
+  ]) {
+    it(`logs in with the password when the stored session is ${JSON.stringify(value)}`, async () => {
+      const adapter = setup();
+      adapter.states['info.session'] = value;
+      await adapter.onReady();
+      expect(logins(adapter)).to.have.length(1);
+      expect(jwtTokens(adapter)).to.deep.equal(['COOKIE']);
+      expect(adapter.states['info.connection']).to.equal(true);
+    });
+  }
+
+  it('sends the stored device ids as cookies with the password login', async () => {
+    const adapter = setup();
+    store(adapter, { username: 'user@example.com', gmid: 'G1', ucid: 'U1' });
+    await adapter.onReady();
+    expect(logins(adapter)[0].args[0].headers.Cookie).to.equal('gmid=G1; ucid=U1');
+  });
+
+  it('sends no cookie without stored device ids', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    expect(logins(adapter)[0].args[0].headers.Cookie).to.equal(undefined);
+  });
+
+  it('logs in again with the stored token after a refresh that Gigya did not answer', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.requestClient = setup({ 'accounts.getJWT': httpError(500) }).requestClient;
+    await adapter.refreshToken();
+    adapter.requestClient = setup().requestClient;
+    await adapter.timeouts.at(-1)?.fn();
+    expect(logins(adapter)).to.deep.equal([]);
+    expect(adapter.states['info.connection']).to.equal(true);
+  });
+
+  it('never logs the stored token', async () => {
+    const rejected = setup({ 'accounts.getJWT': { errorCode: 403005, errorMessage: 'Unauthorized user' } });
+    store(rejected, { username: 'user@example.com', loginToken: 'STORED', gmid: 'GMID-S', ucid: 'UCID-S' });
+    await rejected.onReady();
+    const failing = setup({ 'accounts.getJWT': httpError(500) });
+    store(failing, { username: 'user@example.com', loginToken: 'STORED' });
+    await failing.onReady();
+    for (const adapter of [rejected, failing]) {
+      expect(allLines(adapter).filter((line) => /STORED|GMID-S|UCID-S|COOKIE/.test(line))).to.deep.equal([]);
+    }
+  });
+});
+
 describe('relogin', () => {
   async function connected() {
     const adapter = setup();
     await adapter.onReady();
     return adapter;
   }
+  // Gigya rejects the session, so the relogin drops the stored token and logs in with the password
   const failRefresh = (adapter, routes = {}) => {
-    adapter.requestClient = setup({ 'accounts.getJWT': httpError(500), ...routes }).requestClient;
+    adapter.requestClient = setup({ 'accounts.getJWT': { errorCode: 403005, errorMessage: 'Unauthorized user' }, ...routes }).requestClient;
   };
 
   it('stops polling and logs in again one minute after a failed refresh', async () => {

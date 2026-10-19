@@ -31,6 +31,7 @@ class FakeAdapter extends EventEmitter {
     this.subscribeStates = sinon.spy();
     this.sendTo = sinon.spy();
     this.getForeignObjectAsync = sinon.stub().resolves(null);
+    this.registerNotification = sinon.stub().resolves();
   }
 
   /** @param {string} id */
@@ -41,6 +42,16 @@ class FakeAdapter extends EventEmitter {
   /** @param {string} id */
   fullId(id) {
     return this.namespace + '.' + this.relativeId(id);
+  }
+
+  /** Stand-in for the system-secret encryption: reversible and visibly not plain text. */
+  encrypt(value) {
+    return 'enc:' + Buffer.from(value).toString('base64');
+  }
+
+  /** Like the real one, a value that was never encrypted decrypts to garbage instead of throwing. */
+  decrypt(value) {
+    return value.startsWith('enc:') ? Buffer.from(value.slice(4), 'base64').toString() : '\u0000garbage';
   }
 
   setState(id, state, ack) {
@@ -169,6 +180,18 @@ function httpError(status, config = {}, data = { status }) {
   return error;
 }
 
+const HEADERS = Symbol('headers');
+
+/**
+ * A route answer with response headers, e.g. the Set-Cookie of accounts.webSdkBootstrap.
+ *
+ * @param {unknown} data
+ * @param {Record<string, unknown>} headers
+ */
+function withHeaders(data, headers) {
+  return { [HEADERS]: headers, data };
+}
+
 /**
  * Create an adapter whose HTTP client answers per URL fragment.
  * A route value is a response body, an Error to throw, or a function of the request that returns
@@ -195,7 +218,10 @@ function createTestAdapter(routes = {}) {
     if (answer instanceof Error) {
       throw answer;
     }
-    return { data: answer };
+    if (answer && typeof answer === 'object' && HEADERS in answer) {
+      return { data: answer.data, headers: answer[HEADERS] };
+    }
+    return { data: answer, headers: {} };
   });
   adapter.json2iob.parse = sinon.spy();
   return adapter;
@@ -221,4 +247,4 @@ function fixtureRoutes() {
   };
 }
 
-module.exports = { FakeAdapter, createTestAdapter, fixtureRoutes, httpError, ACCOUNT, VEHICLE };
+module.exports = { FakeAdapter, createTestAdapter, fixtureRoutes, httpError, withHeaders, ACCOUNT, VEHICLE };

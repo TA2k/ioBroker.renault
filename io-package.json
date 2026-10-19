@@ -234,6 +234,19 @@
         "def": "{}"
       },
       "native": {}
+    },
+    {
+      "_id": "info.session",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Login session (encrypted)",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
     }
   ]
 }
