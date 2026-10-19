@@ -206,6 +206,41 @@
       "lg": 3,
       "xl": 3
     },
+    "_tfaCode": {
+      "type": "text",
+      "label": "Code from the email",
+      "help": "Only needed when Test login says a code was sent",
+      "maxLength": 10,
+      "newLine": true,
+      "xs": 12,
+      "sm": 12,
+      "md": 4,
+      "lg": 2,
+      "xl": 2
+    },
+    "_tfaConfirm": {
+      "type": "sendTo",
+      "label": "Confirm code",
+      "command": "tfaConfirm",
+      "jsonData": "{\"code\": ${JSON.stringify(data._tfaCode ?? \"\")}}",
+      "icon": "send",
+      "variant": "outlined",
+      "showProcess": true,
+      "timeout": 60000,
+      "error": {
+        "invalidCode": "Enter the code from the email, digits only.",
+        "noPending": "No code is waiting. Press Test login to get a new code.",
+        "wrongCode": "The code is wrong. Check the email and try again.",
+        "failed": "The account service refused the code. Press Test login to get a new code.",
+        "unreachable": "The account service did not answer. Check the internet connection of ioBroker and try again.",
+        "busy": "A login test is already running."
+      },
+      "xs": 12,
+      "sm": 12,
+      "md": 4,
+      "lg": 3,
+      "xl": 3
+    },
     "_pollingHeader": {
       "type": "header",
       "text": "Polling",

@@ -63,13 +63,12 @@ const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
 // requests the code and Confirm code in the settings finishes the login
 const LOGIN_TWO_FACTOR_CODE = 403101;
 // completeVerification answers a wrong code with 400006; the challenge stays valid for another try
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by Confirm code
 const TFA_WRONG_CODE = 400006;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by Confirm code
 const TFA_PENDING_MS = 10 * 60 * 1000;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used by Confirm code
 const TFA_CODE = /^\d{4,10}$/;
 const TFA_SENT_TEXT = 'A code was sent to %s. Enter it below and press Confirm code.';
+const TFA_CONNECT_TEXT = 'Login confirmed. The adapter connects now.';
+const TFA_SAVE_TEXT = 'Login confirmed. Save and close to start the adapter.';
 const TWO_FACTOR_TEXT = 'The account asks for a code by email at login (two-factor authentication). The adapter does not support this yet';
 const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
 // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
@@ -1896,11 +1895,15 @@ class Renault extends utils.Adapter {
    * @param {ioBroker.Message} obj
    */
   async onMessage(obj) {
-    if (!obj?.callback || obj.command !== 'testLogin') {
+    if (!obj?.callback || (obj.command !== 'testLogin' && obj.command !== 'tfaConfirm')) {
       return;
     }
     const reply = (answer) => this.sendTo(obj.from, obj.command, answer, obj.callback);
     const message = obj.message && typeof obj.message === 'object' ? /** @type {Record<string, unknown>} */ (obj.message) : {};
+    if (obj.command === 'tfaConfirm') {
+      await this.runExclusive(reply, () => this.confirmTwoFactor(message));
+      return;
+    }
     const username = typeof message.username === 'string' ? message.username.trim() : '';
     const password = typeof message.password === 'string' ? message.password : '';
     if (!username || !password || username.length > 254 || password.length > 1024) {
@@ -2038,7 +2041,73 @@ class Renault extends utils.Adapter {
     );
     this.pendingTfa = { username, password, regToken, gigyaAssertion, phvToken, device, since: Date.now() };
     const address = typeof email.obfuscated === 'string' ? email.obfuscated.slice(0, 100) : '?';
-    return { result: (await this.translate(TFA_SENT_TEXT)).replace('%s', address) };
+    return { result: (await this.translate(TFA_SENT_TEXT)).replace('%s', () => address) };
+  }
+
+  /**
+   * Confirm the emailed code. Gigya then remembers the device, and the login token is stored. If
+   * the instance stopped because of the code and the email is the configured one, it connects now.
+   *
+   * @param {Record<string, unknown>} message
+   * @returns {Promise<{ result: string } | { error: string }>}
+   */
+  async confirmTwoFactor(message) {
+    const code = typeof message.code === 'string' ? message.code.trim() : '';
+    if (!TFA_CODE.test(code)) {
+      return { error: 'invalidCode' };
+    }
+    const pending = this.pendingTfa;
+    if (!pending || Date.now() - pending.since > TFA_PENDING_MS) {
+      this.pendingTfa = null;
+      return { error: 'noPending' };
+    }
+    const { device, gigyaAssertion } = pending;
+    let providerAssertion;
+    try {
+      ({ providerAssertion } = await this.gigyaGet(
+        'accounts.tfa.email.completeVerification',
+        { gigyaAssertion, phvToken: pending.phvToken, code },
+        device,
+        'providerAssertion',
+      ));
+    } catch (error) {
+      if (error instanceof GigyaError && error.gigyaCode === TFA_WRONG_CODE) {
+        return { error: 'wrongCode' };
+      }
+      throw error;
+    }
+    // tempDevice=false: Gigya remembers this device and does not ask again for about 30 days
+    await this.gigyaGet(
+      'accounts.tfa.finalizeTFA',
+      { gigyaAssertion, providerAssertion, regToken: pending.regToken, tempDevice: 'false' },
+      device,
+    );
+    const res = await this.requestClient({
+      method: 'post',
+      url: GIGYA_URL + '/accounts.login',
+      headers: { ...this.gigyaHeaders(), ...deviceCookie(device) },
+      data: qs.stringify({
+        apikey: GIGYA_API_KEY,
+        format: 'json',
+        httpStatusCodes: 'false',
+        loginID: pending.username,
+        password: pending.password,
+      }),
+    });
+    const loginToken = res?.data?.sessionInfo?.cookieValue;
+    if (typeof loginToken !== 'string' || !loginToken) {
+      const errorCode = Number(res?.data?.errorCode);
+      throw new GigyaError('accounts.login after the code: ' + errorCode + ' ' + res?.data?.errorMessage, errorCode);
+    }
+    this.pendingTfa = null;
+    await this.writeSession({ username: pending.username, loginToken, ...device });
+    if (this.twoFactorRequired && pending.username.toLowerCase() === String(this.config.username ?? '').toLowerCase()) {
+      this.twoFactorRequired = false;
+      this.loginRejected = false;
+      this.reconnect(0);
+      return { result: await this.translate(TFA_CONNECT_TEXT) };
+    }
+    return { result: await this.translate(TFA_SAVE_TEXT) };
   }
 
   /**

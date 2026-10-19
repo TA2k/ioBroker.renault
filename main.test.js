@@ -282,6 +282,194 @@ describe('login code', () => {
     await ask(adapter, { username: 'a@b.c', password: 'x' });
     expect(answer(adapter)).to.deep.equal({ error: 'unreachable' });
   });
+
+  const CONNECT = 'Login confirmed. The adapter connects now.';
+  const SAVE = 'Login confirmed. Save and close to start the adapter.';
+  const read = (adapter) => JSON.parse(adapter.decrypt(adapter.states['info.session']));
+
+  async function codeSent(routes = {}, username = 'a@b.c') {
+    const adapter = setup(tfaRoutes(routes));
+    await ask(adapter, { username, password: 'form-pass' });
+    expect(answer(adapter)).to.deep.equal({ result: SENT });
+    return adapter;
+  }
+
+  it('stores the session after the right code', async () => {
+    const adapter = await codeSent();
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
+    expect(calls(adapter, 'accounts.tfa.email.completeVerification')[0].args[0].params).to.include({
+      gigyaAssertion: 'ASSERT1',
+      phvToken: 'PHV1',
+      code: '123456',
+    });
+    expect(calls(adapter, 'accounts.tfa.finalizeTFA')[0].args[0].params).to.include({
+      gigyaAssertion: 'ASSERT1',
+      providerAssertion: 'PROVIDER1',
+      regToken: 'REG1',
+      tempDevice: 'false',
+    });
+    const relogin = calls(adapter, 'accounts.login').at(-1).args[0];
+    expect(relogin.data).to.include('loginID=a%40b.c').and.include('password=form-pass');
+    expect(read(adapter)).to.deep.equal({ username: 'a@b.c', loginToken: 'TFA_TOKEN', gmid: 'GMID1', ucid: 'UCID1' });
+    expect(adapter.pendingTfa).to.equal(null);
+    expect(adapter.timeouts).to.deep.equal([]);
+  });
+
+  it('connects at once when the instance stopped because of the code', async () => {
+    const adapter = setup(tfaRoutes());
+    await adapter.onReady();
+    expect(adapter.twoFactorRequired).to.equal(true);
+    await ask(adapter, { username: 'USER@example.com', password: 'secret' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: CONNECT });
+    expect(adapter.twoFactorRequired).to.equal(false);
+    expect(adapter.loginRejected).to.equal(false);
+    const logins = calls(adapter, 'accounts.login').length;
+    await adapter.timeouts.at(-1)?.fn();
+    expect(calls(adapter, 'accounts.login')).to.have.length(logins);
+    expect(adapter.session_data.cookieValue).to.equal('TFA_TOKEN');
+    expect(adapter.states['info.connection']).to.equal(true);
+  });
+
+  it('accepts a code with spaces around it', async () => {
+    const adapter = await codeSent();
+    await ask(adapter, { code: ' 123456 ' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
+    expect(calls(adapter, 'accounts.tfa.email.completeVerification')[0].args[0].params.code).to.equal('123456');
+  });
+
+  for (const code of ['1234', '1234567890']) {
+    it(`accepts the code length boundary ${code.length}`, async () => {
+      const adapter = await codeSent();
+      await ask(adapter, { code }, 'tfaConfirm');
+      expect(answer(adapter)).to.deep.equal({ result: SAVE });
+    });
+  }
+
+  for (const code of ['', '   ', '123', '12345678901', '12a456', '12 456', '１２３４５６', 123456, null, undefined, ['123456']]) {
+    it(`rejects the code ${JSON.stringify(code)} without a request`, async () => {
+      const adapter = await codeSent();
+      adapter.requestClient.resetHistory();
+      await ask(adapter, { code }, 'tfaConfirm');
+      expect(answer(adapter)).to.deep.equal({ error: 'invalidCode' });
+      expect(adapter.requestClient.called).to.equal(false);
+      expect(adapter.pendingTfa).to.not.equal(null);
+    });
+  }
+
+  it('rejects a message that is no object', async () => {
+    const adapter = await codeSent();
+    await ask(adapter, '123456', 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'invalidCode' });
+  });
+
+  it('keeps the challenge after a wrong code', async () => {
+    const adapter = await codeSent({
+      'accounts.tfa.email.completeVerification': (request) =>
+        request.params.code === '123456'
+          ? { errorCode: 0, providerAssertion: 'PROVIDER1' }
+          : { errorCode: 400006, errorMessage: 'Invalid parameter value' },
+    });
+    await ask(adapter, { code: '111111' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'wrongCode' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
+    expect(calls(adapter, 'accounts.tfa.email.sendVerificationCode')).to.have.length(1);
+  });
+
+  it('answers noPending when no code was requested', async () => {
+    const adapter = setup(tfaRoutes());
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'noPending' });
+    expect(adapter.requestClient.called).to.equal(false);
+  });
+
+  it('still accepts the code exactly 10 minutes after the request', async () => {
+    const clock = useClock();
+    const adapter = await codeSent();
+    clock.tick(10 * 60 * 1000);
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
+  });
+
+  it('drops the challenge 1 ms after 10 minutes', async () => {
+    const clock = useClock();
+    const adapter = await codeSent();
+    clock.tick(10 * 60 * 1000 + 1);
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'noPending' });
+    expect(adapter.pendingTfa).to.equal(null);
+    expect(calls(adapter, 'accounts.tfa.email.completeVerification')).to.deep.equal([]);
+  });
+
+  it('confirms against the latest challenge when Test login is pressed again', async () => {
+    let sent = 0;
+    const adapter = await codeSent({ 'accounts.tfa.email.sendVerificationCode': () => ({ errorCode: 0, phvToken: 'PHV' + ++sent }) });
+    await ask(adapter, { username: 'a@b.c', password: 'form-pass' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(calls(adapter, 'accounts.tfa.email.completeVerification')[0].args[0].params.phvToken).to.equal('PHV2');
+  });
+
+  it('answers failed when the login after the code is refused, and keeps the session state', async () => {
+    const adapter = await codeSent({ 'accounts.login': TWO_FACTOR });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'failed' });
+    expect(adapter.states['info.session']).to.equal(undefined);
+  });
+
+  it('answers failed when finalizeTFA is refused', async () => {
+    const adapter = await codeSent({ 'accounts.tfa.finalizeTFA': { errorCode: 403007, errorMessage: 'Permission denied' } });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'failed' });
+  });
+
+  it('answers unreachable when the confirmation gets no answer', async () => {
+    const adapter = await codeSent({ 'accounts.tfa.email.completeVerification': new Error('ECONNRESET') });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'unreachable' });
+  });
+
+  it('runs no confirmation while a login test is running', async () => {
+    /** @type {(value: unknown) => void} */
+    let release = () => {};
+    const adapter = await codeSent();
+    adapter.requestClient = setup(tfaRoutes({ 'accounts.login': () => new Promise((resolve) => (release = resolve)) })).requestClient;
+    const running = ask(adapter, { username: 'a@b.c', password: 'x' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'busy' });
+    release({ sessionInfo: { cookieValue: 'C' } });
+    await running;
+  });
+
+  it('logs and answers no secret of the challenge', async () => {
+    const adapter = await codeSent({
+      'accounts.tfa.email.completeVerification': (request) =>
+        request.params.code === '123456'
+          ? { errorCode: 0, providerAssertion: 'PROVIDER1' }
+          : { errorCode: 400006, errorMessage: 'Invalid parameter value' },
+    });
+    await ask(adapter, { code: '111111' }, 'tfaConfirm');
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    const failing = await codeSent({ 'accounts.tfa.finalizeTFA': { errorCode: 403007, errorMessage: 'Permission denied' } });
+    await ask(failing, { code: '123456' }, 'tfaConfirm');
+    for (const each of [adapter, failing]) {
+      const lines = Object.values(each.log).flatMap((spy) => spy.getCalls().map((call) => require('node:util').inspect(call.args)));
+      const answers = each.sendTo.getCalls().map((call) => JSON.stringify(call.args[2]));
+      for (const secret of ['REG1', 'ASSERT1', 'PHV1', 'PROVIDER1', 'TFA_TOKEN', 'GMID1', 'UCID1', '111111', '123456', 'form-pass']) {
+        expect([...lines, ...answers].filter((text) => text.includes(secret))).to.deep.equal([]);
+      }
+    }
+    expect(adapter.states['info.session']).to.not.include('TFA_TOKEN');
+  });
+
+  for (const code of ['123456', 'a"b', 'back\\slash', 'line\nbreak', '${x}', '`tick`']) {
+    it(`sends the code field ${JSON.stringify(code)} unchanged`, () => {
+      const jsonData = require('./admin/jsonConfig.json').items._tfaConfirm.jsonData;
+      const text = new Function('data', 'return `' + jsonData.replace(/`/g, '\\`') + '`')({ _tfaCode: code });
+      expect(JSON.parse(text)).to.deep.equal({ code });
+    });
+  }
 });
 
 describe('startup', () => {
