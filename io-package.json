@@ -186,6 +186,71 @@
     "disableChargeFetching": false,
     "chargeHistoryLimit": 100
   },
+  "notifications": [
+    {
+      "scope": "renault",
+      "name": {
+        "en": "Renault",
+        "de": "Renault",
+        "ru": "Renault",
+        "pt": "Renault",
+        "nl": "Renault",
+        "fr": "Renault",
+        "it": "Renault",
+        "es": "Renault",
+        "pl": "Renault",
+        "uk": "Renault",
+        "zh-cn": "Renault"
+      },
+      "description": {
+        "en": "Messages of the Renault adapter",
+        "de": "Meldungen des Renault-Adapters",
+        "ru": "Сообщения адаптера Renault",
+        "pt": "Mensagens do adaptador Renault",
+        "nl": "Meldingen van de Renault-adapter",
+        "fr": "Messages de l'adaptateur Renault",
+        "it": "Messaggi dell'adattatore Renault",
+        "es": "Mensajes del adaptador Renault",
+        "pl": "Komunikaty adaptera Renault",
+        "uk": "Повідомлення адаптера Renault",
+        "zh-cn": "Renault 适配器的消息"
+      },
+      "categories": [
+        {
+          "category": "loginCode",
+          "name": {
+            "en": "Login code needed",
+            "de": "Anmeldecode nötig",
+            "ru": "Нужен код для входа",
+            "pt": "Código de login necessário",
+            "nl": "Inlogcode nodig",
+            "fr": "Code de connexion requis",
+            "it": "Codice di accesso necessario",
+            "es": "Se necesita un código de inicio de sesión",
+            "pl": "Wymagany kod logowania",
+            "uk": "Потрібен код для входу",
+            "zh-cn": "需要登录验证码"
+          },
+          "severity": "alert",
+          "description": {
+            "en": "Renault asks for a code by email at login. Open the instance settings, press Test login and confirm the code from the email.",
+            "de": "Renault verlangt beim Login einen Code per E-Mail. Instanzeinstellungen öffnen, Login testen drücken und den Code aus der E-Mail bestätigen.",
+            "ru": "Renault запрашивает при входе код по электронной почте. Откройте настройки экземпляра, нажмите «Проверить вход» и подтвердите код из письма («Подтвердить код»).",
+            "pt": "A Renault pede um código por e-mail no login. Abra as configurações da instância, clique em Testar login e confirme o código do e-mail (Confirmar código).",
+            "nl": "Renault vraagt bij het inloggen om een code per e-mail. Open de instantie-instellingen, druk op Inloggen testen en bevestig de code uit de e-mail (Code bevestigen).",
+            "fr": "Renault demande un code par e-mail lors de la connexion. Ouvrez les paramètres de l'instance, cliquez sur Tester la connexion et confirmez le code de l'e-mail (Confirmer le code).",
+            "it": "Renault richiede un codice via e-mail all'accesso. Apri le impostazioni dell'istanza, premi Prova accesso e conferma il codice ricevuto via e-mail (Conferma codice).",
+            "es": "Renault pide un código por correo electrónico al iniciar sesión. Abra la configuración de la instancia, pulse Probar inicio de sesión y confirme el código del correo (Confirmar código).",
+            "pl": "Renault wymaga przy logowaniu kodu przesłanego e-mailem. Otwórz ustawienia instancji, kliknij Testuj logowanie i potwierdź kod z e-maila (Potwierdź kod).",
+            "uk": "Renault запитує під час входу код електронною поштою. Відкрийте налаштування екземпляра, натисніть «Перевірити вхід» і підтвердьте код з листа («Підтвердити код»).",
+            "zh-cn": "Renault 登录时需要通过电子邮件发送的验证码。请打开实例设置，点击“测试登录”，然后确认邮件中的验证码（“确认验证码”）。"
+          },
+          "regex": [],
+          "limit": 1
+        }
+      ]
+    }
+  ],
   "objects": [],
   "instanceObjects": [
     {

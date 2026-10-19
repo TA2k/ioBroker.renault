@@ -69,7 +69,8 @@ const TFA_CODE = /^\d{4,10}$/;
 const TFA_SENT_TEXT = 'A code was sent to %s. Enter it below and press Confirm code.';
 const TFA_CONNECT_TEXT = 'Login confirmed. The adapter connects now.';
 const TFA_SAVE_TEXT = 'Login confirmed. Save and close to start the adapter.';
-const TWO_FACTOR_TEXT = 'The account asks for a code by email at login (two-factor authentication). The adapter does not support this yet';
+const TWO_FACTOR_TEXT =
+  'Renault asks for a code by email at login (two-factor authentication). Open the instance settings, press Test login and confirm the code from the email';
 const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
 // Gigya key of the EU tenant (renault-api GIGYA_KEY_EU), the same for every country and for Renault, Dacia and Alpine
 const GIGYA_API_KEY = '3_VgdkgtIRH3AdHvJm-cjV2ug2EFE0lxt0IJzMC4MFqZjFpn_GYFXVdNZ19L7wZX0N';
@@ -621,7 +622,7 @@ class Renault extends utils.Adapter {
       return;
     }
     if (this.twoFactorRequired) {
-      this.log.error(TWO_FACTOR_TEXT + '. Nothing more is tried until the instance is restarted.');
+      this.log.error(TWO_FACTOR_TEXT + '. Nothing more is tried until the code is confirmed or the instance is restarted.');
       return;
     }
     if (this.loginRejected) {
@@ -856,6 +857,9 @@ class Renault extends utils.Adapter {
       });
     if (!this.session_data) {
       if (this.twoFactorRequired) {
+        await this.registerNotification('renault', 'loginCode', TWO_FACTOR_TEXT).catch((error) =>
+          this.log.debug('Notification failed: ' + /** @type {Error} */ (error).message),
+        );
         return false;
       }
       this.log.error('No session found for this account. Please login in the app. Maybe a new password is needed.');

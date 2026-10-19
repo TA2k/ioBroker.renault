@@ -330,6 +330,7 @@ describe('login code', () => {
     expect(calls(adapter, 'accounts.login')).to.have.length(logins);
     expect(adapter.session_data.cookieValue).to.equal('TFA_TOKEN');
     expect(adapter.states['info.connection']).to.equal(true);
+    expect(adapter.registerNotification.callCount).to.equal(1);
   });
 
   it('accepts a code with spaces around it', async () => {
@@ -542,8 +543,24 @@ describe('startup', () => {
       expect(errors.some((line) => line.includes('two-factor authentication'))).to.equal(true);
       expect(errors.some((line) => line.includes('Check email and password') || line.includes('new password'))).to.equal(false);
       expect(errors.join(' ')).to.not.include('secret-reg');
+      expect(adapter.registerNotification.calledOnceWith('renault', 'loginCode')).to.equal(true);
+      expect(String(adapter.registerNotification.firstCall.args[2])).to.include('Test login');
     });
   }
+
+  it('stops cleanly when the notification cannot be raised', async () => {
+    const adapter = setup({ 'accounts.login': { errorCode: 403101, errorMessage: 'Account Pending TFA Verification', regToken: 'R' } });
+    adapter.registerNotification = sinon.stub().rejects(new Error('no notification support'));
+    await adapter.onReady();
+    expect(adapter.timeouts).to.have.length(0);
+    expect(logged(adapter.log.error).some((line) => line.includes('Test login'))).to.equal(true);
+  });
+
+  it('raises no notification for a rejected password', async () => {
+    const adapter = setup({ 'accounts.login': { errorCode: 403042, errorMessage: 'Invalid LoginID' } });
+    await adapter.onReady();
+    expect(adapter.registerNotification.called).to.equal(false);
+  });
 
   for (const body of [
     { errorCode: 500001, errorMessage: 'General Server Error' },
