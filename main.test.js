@@ -419,6 +419,31 @@ describe('login code', () => {
     expect(adapter.states['info.session']).to.equal(undefined);
   });
 
+  for (const [name, firstLogin, expected] of [
+    ['gets no answer', new Error('ECONNRESET'), 'unreachable'],
+    ['is refused', { errorCode: 403007, errorMessage: 'Permission denied' }, 'failed'],
+  ]) {
+    it(`retries only the login when it ${name} after the code was accepted`, async () => {
+      let attempt = 0;
+      const adapter = await codeSent({
+        'accounts.login': (request) => {
+          if (request.headers?.Cookie !== 'gmid=GMID1; ucid=UCID1') {
+            return TWO_FACTOR;
+          }
+          return ++attempt === 1 ? firstLogin : { sessionInfo: { cookieValue: 'TFA_TOKEN' } };
+        },
+      });
+      await ask(adapter, { code: '123456' }, 'tfaConfirm');
+      expect(answer(adapter)).to.deep.equal({ error: expected });
+      expect(adapter.states['info.session']).to.equal(undefined);
+      await ask(adapter, { code: '123456' }, 'tfaConfirm');
+      expect(answer(adapter)).to.deep.equal({ result: SAVE });
+      expect(calls(adapter, 'accounts.tfa.email.completeVerification')).to.have.length(1);
+      expect(calls(adapter, 'accounts.tfa.finalizeTFA')).to.have.length(1);
+      expect(read(adapter)).to.deep.equal({ username: 'a@b.c', loginToken: 'TFA_TOKEN', gmid: 'GMID1', ucid: 'UCID1' });
+    });
+  }
+
   it('answers failed when finalizeTFA is refused', async () => {
     const adapter = await codeSent({ 'accounts.tfa.finalizeTFA': { errorCode: 403007, errorMessage: 'Permission denied' } });
     await ask(adapter, { code: '123456' }, 'tfaConfirm');

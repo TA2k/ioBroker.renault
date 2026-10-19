@@ -472,7 +472,7 @@ class Renault extends utils.Adapter {
     /**
      * The code challenge Test login started; only in memory, gone after TFA_PENDING_MS
      *
-     * @type {{ username: string, password: string, regToken: string, gigyaAssertion: string, phvToken: string, device: { gmid: string, ucid: string }, since: number } | null}
+     * @type {{ username: string, password: string, regToken: string, gigyaAssertion: string, phvToken: string, device: { gmid: string, ucid: string }, since: number, finalized?: boolean } | null}
      */
     this.pendingTfa = null;
   }
@@ -2067,26 +2067,30 @@ class Renault extends utils.Adapter {
       return { error: 'noPending' };
     }
     const { device, gigyaAssertion } = pending;
-    let providerAssertion;
-    try {
-      ({ providerAssertion } = await this.gigyaGet(
-        'accounts.tfa.email.completeVerification',
-        { gigyaAssertion, phvToken: pending.phvToken, code },
-        device,
-        'providerAssertion',
-      ));
-    } catch (error) {
-      if (error instanceof GigyaError && error.gigyaCode === TFA_WRONG_CODE) {
-        return { error: 'wrongCode' };
+    // After the code was accepted only the login is left; a retry must not use the spent phvToken again
+    if (!pending.finalized) {
+      let providerAssertion;
+      try {
+        ({ providerAssertion } = await this.gigyaGet(
+          'accounts.tfa.email.completeVerification',
+          { gigyaAssertion, phvToken: pending.phvToken, code },
+          device,
+          'providerAssertion',
+        ));
+      } catch (error) {
+        if (error instanceof GigyaError && error.gigyaCode === TFA_WRONG_CODE) {
+          return { error: 'wrongCode' };
+        }
+        throw error;
       }
-      throw error;
+      // tempDevice=false: Gigya remembers this device and does not ask again for about 30 days
+      await this.gigyaGet(
+        'accounts.tfa.finalizeTFA',
+        { gigyaAssertion, providerAssertion, regToken: pending.regToken, tempDevice: 'false' },
+        device,
+      );
+      pending.finalized = true;
     }
-    // tempDevice=false: Gigya remembers this device and does not ask again for about 30 days
-    await this.gigyaGet(
-      'accounts.tfa.finalizeTFA',
-      { gigyaAssertion, providerAssertion, regToken: pending.regToken, tempDevice: 'false' },
-      device,
-    );
     const res = await this.requestClient({
       method: 'post',
       url: GIGYA_URL + '/accounts.login',
