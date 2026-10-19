@@ -59,6 +59,8 @@ const KAMEREON_KEY_LINE = /^KAMEREON_APIKEY = "([A-Za-z0-9]{20,64})"\r?$/m;
  * captcha required. Every other error body (server error, temporary lockout) is retried.
  */
 const LOGIN_REJECTED_CODES = [403042, 401030, 401020];
+// Gigya answers these when it is busy or the account is locked for a while: 403048 rate limit, 403120 temporarily locked out
+const GIGYA_TEMPORARY_CODES = [403048, 403120];
 // Gigya asks for a code sent by email (two-factor authentication). A retry cannot help; Test login
 // requests the code and Confirm code in the settings finishes the login
 const LOGIN_TWO_FACTOR_CODE = 403101;
@@ -796,14 +798,13 @@ class Renault extends utils.Adapter {
       this.log.debug('Logged in with the stored session, without the password');
       return 'ok';
     }
-    const errorCode = Number(data?.errorCode);
-    if (errorCode >= 500000) {
-      this.log.warn('Login with the stored session failed: Gigya error ' + errorCode);
+    const errorCode = data?.errorCode;
+    // Only a Gigya error code that rejects the token drops it; any other answer keeps it
+    if (!(Number.isInteger(errorCode) && errorCode > 0 && errorCode < 500000) || GIGYA_TEMPORARY_CODES.includes(errorCode)) {
+      this.log.warn('Login with the stored session failed' + (errorCode ? ': Gigya error ' + errorCode : ''));
       return 'failed';
     }
-    this.log.info(
-      'The stored session is no longer valid' + (errorCode ? ' (error ' + errorCode + ')' : '') + ', logging in with the password',
-    );
+    this.log.info('The stored session is no longer valid (error ' + errorCode + '), logging in with the password');
     await this.writeSession({ username: this.config.username, gmid: stored.gmid, ucid: stored.ucid });
     return 'invalid';
   }

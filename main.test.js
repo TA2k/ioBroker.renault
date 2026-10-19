@@ -1358,6 +1358,40 @@ describe('stored session', () => {
     });
   }
 
+  for (const [name, body] of [
+    ['a body without errorCode', {}],
+    ['errorCode 0 without id token', { errorCode: 0 }],
+    ['a string body', '<html>'],
+    ['a non-numeric errorCode', { errorCode: 'abc' }],
+    ['errorCode 500000', { errorCode: 500000 }],
+    ['rate limit 403048', { errorCode: 403048 }],
+    ['temporary lockout 403120', { errorCode: 403120 }],
+  ]) {
+    it(`keeps the stored token and backs off on ${name}`, async () => {
+      const adapter = setup({ 'accounts.getJWT': body });
+      store(adapter, { username: 'user@example.com', loginToken: 'STORED' });
+      await adapter.onReady();
+      expect(logins(adapter)).to.deep.equal([]);
+      expect(read(adapter).loginToken).to.equal('STORED');
+      expect(adapter.timeouts.at(-1)?.ms).to.equal(5 * 60 * 1000);
+      expect(adapter.states['info.connection']).to.equal(false);
+      expect(allLines(adapter).filter((line) => line.includes('STORED'))).to.deep.equal([]);
+    });
+  }
+
+  for (const errorCode of [499999, 403005]) {
+    it(`drops the stored token and logs in with the password on errorCode ${errorCode}`, async () => {
+      const adapter = setup({
+        'accounts.getJWT': (request) => (String(request.data).includes('login_token=STORED&') ? { errorCode } : { id_token: 'ID_TOKEN' }),
+      });
+      store(adapter, { username: 'user@example.com', loginToken: 'STORED' });
+      await adapter.onReady();
+      expect(logins(adapter)).to.have.length(1);
+      expect(read(adapter).loginToken).to.equal('COOKIE');
+      expect(allLines(adapter).filter((line) => line.includes('STORED'))).to.deep.equal([]);
+    });
+  }
+
   it('ignores the session of another email', async () => {
     const adapter = setup();
     store(adapter, { username: 'other@example.com', loginToken: 'STORED', gmid: 'G1', ucid: 'U1' });
