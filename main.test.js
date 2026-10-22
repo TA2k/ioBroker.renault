@@ -313,7 +313,8 @@ describe('login code', () => {
     expect(relogin.data).to.include('loginID=a%40b.c').and.include('password=form-pass');
     expect(read(adapter)).to.deep.equal({ username: 'a@b.c', loginToken: 'TFA_TOKEN', gmid: 'GMID1', ucid: 'UCID1' });
     expect(adapter.pendingTfa).to.equal(null);
-    expect(adapter.timeouts).to.deep.equal([]);
+    // only the expiry timer of the challenge, no reconnect
+    expect(adapter.timeouts.map((timer) => timer.ms)).to.deep.equal([10 * 60 * 1000]);
   });
 
   it('connects at once when the instance stopped because of the code', async () => {
@@ -323,6 +324,7 @@ describe('login code', () => {
     await ask(adapter, { username: 'USER@example.com', password: 'secret' });
     await ask(adapter, { code: '123456' }, 'tfaConfirm');
     expect(answer(adapter)).to.deep.equal({ result: CONNECT });
+    expect(adapter.sendToHost.called).to.equal(false);
     expect(adapter.twoFactorRequired).to.equal(false);
     expect(adapter.loginRejected).to.equal(false);
     const logins = calls(adapter, 'accounts.login').length;
@@ -331,13 +333,55 @@ describe('login code', () => {
     expect(adapter.session_data.cookieValue).to.equal('TFA_TOKEN');
     expect(adapter.states['info.connection']).to.equal(true);
     expect(adapter.registerNotification.callCount).to.equal(1);
+    // the notification of the stop is solved; only the one of this instance is removed
+    expect(adapter.sendToHost.args).to.deep.equal([
+      ['testhost', 'clearNotifications', { scope: 'renault', category: 'loginCode', instance: 'system.adapter.renault.0' }],
+    ]);
+  });
+
+  it('connects with the new session when the configured email is waiting for a retry', async () => {
+    const adapter = setup({ 'accounts.login': new Error('ECONNRESET') });
+    await adapter.onReady();
+    expect(adapter.states['info.connection']).to.equal(false);
+    adapter.requestClient = setup(tfaRoutes()).requestClient;
+    await ask(adapter, { username: 'user@example.com', password: 'secret' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: CONNECT });
+    expect(adapter.timeouts.at(-1)?.ms).to.equal(0);
+    await adapter.timeouts.at(-1)?.fn();
+    expect(adapter.session_data.cookieValue).to.equal('TFA_TOKEN');
+    expect(adapter.states['info.connection']).to.equal(true);
+  });
+
+  it('leaves a connected instance alone and keeps the new session for the next login', async () => {
+    const adapter = setup();
+    await adapter.onReady();
+    adapter.requestClient = setup(tfaRoutes()).requestClient;
+    const timers = adapter.timeouts.length;
+    await ask(adapter, { username: 'user@example.com', password: 'secret' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: 'Login confirmed. The adapter is already connected.' });
+    // the expiry timer of the challenge only
+    expect(adapter.timeouts).to.have.length(timers + 1);
+    expect(adapter.session_data.cookieValue).to.equal('COOKIE');
+    expect(read(adapter).loginToken).to.equal('TFA_TOKEN');
+  });
+
+  it('asks to save when the configured instance has no password', async () => {
+    const adapter = setup(tfaRoutes());
+    adapter.config.password = '';
+    await adapter.onReady();
+    await ask(adapter, { username: 'user@example.com', password: 'typed' });
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
+    expect(adapter.timeouts.map((timer) => timer.ms)).to.deep.equal([10 * 60 * 1000]);
   });
 
   it('keeps the stop and stores the session when the code is for another email', async () => {
     const adapter = setup(tfaRoutes());
     await adapter.onReady();
-    const timers = adapter.timeouts.length;
     await ask(adapter, { username: 'other@example.com', password: 'x' });
+    const timers = adapter.timeouts.length;
     await ask(adapter, { code: '123456' }, 'tfaConfirm');
     expect(answer(adapter)).to.deep.equal({ result: SAVE });
     expect(adapter.timeouts).to.have.length(timers);
@@ -415,6 +459,43 @@ describe('login code', () => {
     expect(answer(adapter)).to.deep.equal({ error: 'noPending' });
     expect(adapter.pendingTfa).to.equal(null);
     expect(calls(adapter, 'accounts.tfa.email.completeVerification')).to.deep.equal([]);
+  });
+
+  it('drops the challenge with the password when its timer runs out', async () => {
+    const adapter = await codeSent();
+    const expiry = adapter.timeouts.filter((timer) => timer.ms === 10 * 60 * 1000);
+    expect(expiry).to.have.length(1);
+    await expiry[0].fn();
+    expect(adapter.pendingTfa).to.equal(null);
+    await ask(adapter, { code: '123456' }, 'tfaConfirm');
+    expect(answer(adapter)).to.deep.equal({ error: 'noPending' });
+  });
+
+  it('keeps a newer challenge when the timer of an older one runs out', async () => {
+    const adapter = await codeSent();
+    await ask(adapter, { username: 'a@b.c', password: 'form-pass' });
+    const [older, newer] = adapter.timeouts.filter((timer) => timer.ms === 10 * 60 * 1000);
+    await older.fn();
+    expect(adapter.pendingTfa).to.not.equal(null);
+    await newer.fn();
+    expect(adapter.pendingTfa).to.equal(null);
+  });
+
+  it('gives every request of both buttons a timeout that fits the wait of the button', async () => {
+    const adapter = setup(tfaRoutes());
+    const items = require('./admin/jsonConfig.json').items;
+    for (const [button, message] of /** @type {[string, unknown][]} */ ([
+      ['_testLogin', { username: 'a@b.c', password: 'x' }],
+      ['_tfaConfirm', { code: '123456' }],
+    ])) {
+      adapter.requestClient.resetHistory();
+      await ask(adapter, message, items[button].command);
+      const timeouts = adapter.requestClient.getCalls().map((call) => call.args[0].timeout);
+      expect(timeouts.length).to.be.greaterThan(0);
+      expect(timeouts.every((timeout) => timeout > 0)).to.equal(true);
+      expect(timeouts.reduce((sum, timeout) => sum + timeout, 0)).to.be.below(items[button].timeout);
+    }
+    expect(answer(adapter)).to.deep.equal({ result: SAVE });
   });
 
   it('confirms against the latest challenge when Test login is pressed again', async () => {

@@ -24,6 +24,7 @@
     "Login": "Anmeldung",
     "Login confirmed. Save and close to start the adapter.": "Anmeldung bestätigt. Speichern und schließen, um den Adapter zu starten.",
     "Login confirmed. The adapter connects now.": "Anmeldung bestätigt. Der Adapter verbindet sich jetzt.",
+    "Login confirmed. The adapter is already connected.": "Anmeldung bestätigt. Der Adapter ist bereits verbunden.",
     "No code is waiting. Press Test login to get a new code.": "Es wartet kein Code. Login testen drücken, um einen neuen Code zu bekommen.",
     "Not connected": "Nicht verbunden",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Anzahl der neuesten Einträge, die je Ladehistorie-Endpunkt behalten werden (0 = unbegrenzt)",

@@ -24,6 +24,7 @@
     "Login": "Авторизация",
     "Login confirmed. Save and close to start the adapter.": "Вход подтверждён. Сохраните и закройте, чтобы запустить адаптер.",
     "Login confirmed. The adapter connects now.": "Вход подтверждён. Адаптер подключается сейчас.",
+    "Login confirmed. The adapter is already connected.": "Вход подтверждён. Адаптер уже подключён.",
     "No code is waiting. Press Test login to get a new code.": "Нет ожидающего кода. Нажмите «Проверить вход», чтобы получить новый код.",
     "Not connected": "Не подключено",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "Количество последних записей, сохраняемых для каждого эндпоинта истории зарядки (0 = без ограничений)",

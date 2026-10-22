@@ -71,6 +71,9 @@ const TFA_CODE = /^\d{4,10}$/;
 const TFA_SENT_TEXT = 'A code was sent to %s. Enter it below and press Confirm code.';
 const TFA_CONNECT_TEXT = 'Login confirmed. The adapter connects now.';
 const TFA_SAVE_TEXT = 'Login confirmed. Save and close to start the adapter.';
+const TFA_CONNECTED_TEXT = 'Login confirmed. The adapter is already connected.';
+// Test login sends up to five requests in a row, and the button of the settings page waits 60 s
+const SETTINGS_REQUEST_TIMEOUT_MS = 10 * 1000;
 const TWO_FACTOR_TEXT =
   'Renault asks for a code by email at login (two-factor authentication). Open the instance settings, press Test login and confirm the code from the email';
 const LOGIN_OK_TEXT = 'Email and password are correct. Save and close to start the adapter.';
@@ -470,7 +473,8 @@ class Renault extends utils.Adapter {
     /** A login test from the settings page is running; a second click waits for it. */
     this.loginTestRunning = false;
     /**
-     * The code challenge Test login started; only in memory, gone after TFA_PENDING_MS
+     * The code challenge Test login started; only in memory, and a timer drops it together with
+     * the password after TFA_PENDING_MS
      *
      * @type {{ username: string, password: string, regToken: string, gigyaAssertion: string, phvToken: string, device: { gmid: string, ucid: string }, since: number, finalized?: boolean } | null}
      */
@@ -608,6 +612,12 @@ class Renault extends utils.Adapter {
       this.startAttempt = 0;
       this.twoFactorRequired = false;
       this.loginRejected = false;
+      // a login code notification of an earlier attempt is solved now
+      this.sendToHost(this.host ?? null, 'clearNotifications', {
+        scope: 'renault',
+        category: 'loginCode',
+        instance: 'system.adapter.' + this.namespace,
+      });
       await this.migrateChargeHistoryV1();
       await this.loadCockpitChoice();
       // a failed first poll must not skip the intervals below; the next poll is already scheduled
@@ -1937,6 +1947,7 @@ class Renault extends utils.Adapter {
       url: GIGYA_URL + '/accounts.login',
       headers: { ...this.gigyaHeaders(), ...deviceCookie(stored) },
       data: qs.stringify({ apikey: GIGYA_API_KEY, format: 'json', httpStatusCodes: 'false', loginID: username, password }),
+      timeout: SETTINGS_REQUEST_TIMEOUT_MS,
     });
     const data = res?.data ?? {};
     if (data.sessionInfo?.cookieValue) {
@@ -1967,6 +1978,7 @@ class Renault extends utils.Adapter {
       url: GIGYA_URL + '/' + method,
       params: { APIKey: GIGYA_API_KEY, format: 'json', ...params },
       headers: { ...this.gigyaHeaders(), ...deviceCookie(device) },
+      timeout: SETTINGS_REQUEST_TIMEOUT_MS,
     });
     const data = res?.data ?? {};
     const errorCode = Number(data.errorCode);
@@ -2000,6 +2012,7 @@ class Renault extends utils.Adapter {
         url: GIGYA_URL + '/accounts.webSdkBootstrap',
         params: { APIKey: GIGYA_API_KEY },
         headers: this.gigyaHeaders(),
+        timeout: SETTINGS_REQUEST_TIMEOUT_MS,
       });
       const ids = deviceIds(res?.headers?.['set-cookie']);
       if (!ids.gmid || !ids.ucid) {
@@ -2025,14 +2038,21 @@ class Renault extends utils.Adapter {
       device,
       'phvToken',
     );
-    this.pendingTfa = { username, password, regToken, gigyaAssertion, phvToken, device, since: Date.now() };
+    const pending = { username, password, regToken, gigyaAssertion, phvToken, device, since: Date.now() };
+    this.pendingTfa = pending;
+    // the password must not outlive the challenge; a timer of an older challenge leaves a newer one alone
+    this.setTimeout(() => {
+      if (this.pendingTfa === pending) {
+        this.pendingTfa = null;
+      }
+    }, TFA_PENDING_MS);
     const address = typeof email.obfuscated === 'string' ? email.obfuscated.slice(0, 100) : '?';
     return { result: (await this.translate(TFA_SENT_TEXT)).replace('%s', () => address) };
   }
 
   /**
-   * Confirm the emailed code. Gigya then remembers the device, and the login token is stored. If
-   * the instance stopped because of the code and the email is the configured one, it connects now.
+   * Confirm the emailed code. Gigya then remembers the device, and the login token is stored. For
+   * the configured email an instance that is not connected connects now with that token.
    *
    * @param {Record<string, unknown>} message
    * @returns {Promise<{ result: string } | { error: string }>}
@@ -2083,6 +2103,7 @@ class Renault extends utils.Adapter {
         loginID: pending.username,
         password: pending.password,
       }),
+      timeout: SETTINGS_REQUEST_TIMEOUT_MS,
     });
     const loginToken = res?.data?.sessionInfo?.cookieValue;
     if (typeof loginToken !== 'string' || !loginToken) {
@@ -2090,15 +2111,23 @@ class Renault extends utils.Adapter {
       throw new GigyaError('accounts.login after the code: ' + errorCode + ' ' + res?.data?.errorMessage, errorCode);
     }
     this.pendingTfa = null;
-    // Known limit: there is one session slot. A code confirmed for another email than the configured one replaces the stored session of the configured account.
+    // Known limit: there is one session slot. A code confirmed for another email replaces the stored
+    // session and device ids of the configured account, so until that email is saved, the next
+    // password login of the configured account (after a restart) asks for a code again.
     await this.writeSession({ username: pending.username, loginToken, ...device });
-    if (this.twoFactorRequired && pending.username.toLowerCase() === String(this.config.username ?? '').toLowerCase()) {
-      this.twoFactorRequired = false;
-      this.loginRejected = false;
-      this.reconnect(0);
-      return { result: await this.translate(TFA_CONNECT_TEXT) };
+    // without a password onReady() stopped before connecting, so only saving the settings starts the adapter
+    const configured = Boolean(this.config.password) && pending.username.toLowerCase() === String(this.config.username ?? '').toLowerCase();
+    if (!configured) {
+      return { result: await this.translate(TFA_SAVE_TEXT) };
     }
-    return { result: await this.translate(TFA_SAVE_TEXT) };
+    // a running session stays; the stored token serves the next login
+    if ((await this.getStateAsync('info.connection'))?.val === true) {
+      return { result: await this.translate(TFA_CONNECTED_TEXT) };
+    }
+    this.twoFactorRequired = false;
+    this.loginRejected = false;
+    this.reconnect(0);
+    return { result: await this.translate(TFA_CONNECT_TEXT) };
   }
 
   /**

@@ -10,6 +10,7 @@ class FakeAdapter extends EventEmitter {
   constructor() {
     super();
     this.namespace = 'renault.0';
+    this.host = 'testhost';
     this.config = {};
     /** @type {Record<string, any>} state values by id relative to the namespace */
     this.states = {};
@@ -30,6 +31,7 @@ class FakeAdapter extends EventEmitter {
     this.clearInterval = sinon.spy();
     this.subscribeStates = sinon.spy();
     this.sendTo = sinon.spy();
+    this.sendToHost = sinon.spy();
     this.getForeignObjectAsync = sinon.stub().resolves(null);
     this.registerNotification = sinon.stub().resolves();
   }

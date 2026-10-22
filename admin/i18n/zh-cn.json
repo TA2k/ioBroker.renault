@@ -24,6 +24,7 @@
     "Login": "登录",
     "Login confirmed. Save and close to start the adapter.": "登录已确认。请保存并关闭以启动适配器。",
     "Login confirmed. The adapter connects now.": "登录已确认。适配器现在开始连接。",
+    "Login confirmed. The adapter is already connected.": "登录已确认。适配器已连接。",
     "No code is waiting. Press Test login to get a new code.": "没有等待中的验证码。请点击“测试登录”获取新的验证码。",
     "Not connected": "未连接",
     "Number of most recent entries kept per charge-history endpoint (0 = unlimited)": "每个充电历史接口保留的最新记录条数（0 = 不限制）",
