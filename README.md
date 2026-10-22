@@ -167,10 +167,12 @@ Until then the adapter sends no commands, so it cannot lock the account with the
 **The log or the admin notifications say Renault asks for a code by email.** Renault asks some
 accounts for a code sent by email at login (two-factor authentication). Open the instance
 settings and press **Test login**. The adapter has Renault send the code and names the address.
-Enter the code in **Code from the email** within 10 minutes and press **Confirm code**. If the 10 minutes have passed,
-press **Test login** again for a new code. The adapter then connects by itself. Renault remembers the ioBroker installation for about 30 days,
-and the adapter keeps its login session across restarts, so a new code is needed only when
-Renault ends that session. A wrong code can be corrected without a new email.
+Enter the code in **Code from the email** within 10 minutes and press **Confirm code**. A wrong
+code can be corrected without a new email; after 10 minutes press **Test login** again for a new
+code. If the email on the page is the one the instance uses, the instance connects at once and
+removes the notification; for a new email, save and close the settings. Renault remembers the
+ioBroker installation for about 30 days, and the adapter keeps its login session across restarts,
+so a new code is needed only when Renault ends that session.
 
 **The log says the Renault request quota is used up (429).** The account allows about 60 requests
 per hour, shared with the app. The adapter pauses by itself for 15, 30 and then 60 minutes. Raise
@@ -191,12 +193,12 @@ above; the adapter does not create it, and removes it if an older version had cr
   ### **WORK IN PROGRESS**
 -->
 ### **WORK IN PROGRESS**
-- Added a **Test login** button to the settings page. It checks email and password with the values on the page before saving and says whether they are wrong or the service did not answer. The page also shows whether the instance is connected.
-- A space before or after the email in the settings no longer makes the login fail with `403042 Invalid LoginID` (#82).
-- Accounts for which Renault asks for a code by email at login (two-factor authentication) work again. **Test login** has the code sent, and **Confirm code** in the settings finishes the login. A login in the background that needs a code stops instead of retrying and raises an admin notification.
-- The login session is kept across restarts, so the adapter logs in with the password only when Renault ends the session.
-- The label and help text of the country in the settings are shown in the language of the admin instead of in English.
-- GPS latitude and longitude now carry the roles `value.gps.latitude` and `value.gps.longitude`, so map widgets and the type detector find the vehicle position. Existing states are updated on the next start.
+- New button in the settings to test the login before saving.
+- Accounts that need a login code by email work again. The code is requested and confirmed in the settings.
+- The login is kept across restarts.
+- A space around the email no longer breaks the login (#82).
+- The country setting is shown in the language of the admin.
+- Map widgets now find the vehicle position.
 
 ### 1.0.0 (2026-09-23)
 
