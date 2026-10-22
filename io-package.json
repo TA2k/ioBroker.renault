@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "renault",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "news": {
+      "1.1.0": {
+        "en": "New button in the settings to test the login before saving.\nAccounts that need a login code by email work again. The code is requested and confirmed in the settings.\nThe login is kept across restarts.\nA space around the email no longer breaks the login (#82).\nThe country setting is shown in the language of the admin.\nMap widgets now find the vehicle position.",
+        "de": "Neuer Knopf in den Einstellungen, um die Anmeldung vor dem Speichern zu testen.\nKonten, die bei der Anmeldung einen Code per E-Mail brauchen, funktionieren wieder. Der Code wird in den Einstellungen angefordert und bestätigt.\nDie Anmeldung bleibt über Neustarts erhalten.\nEin Leerzeichen vor oder nach der E-Mail-Adresse verhindert die Anmeldung nicht mehr (#82).\nDie Einstellung des Landes wird in der Sprache des Admins angezeigt.\nKarten-Widgets finden jetzt die Position des Fahrzeugs.",
+        "ru": "Новая кнопка в настройках для проверки входа перед сохранением.\nУчётные записи, которым при входе нужен код по электронной почте, снова работают. Код запрашивается и подтверждается в настройках.\nВход сохраняется после перезапуска.\nПробел до или после адреса электронной почты больше не мешает входу (#82).\nНастройка страны отображается на языке админки.\nВиджеты карт теперь находят положение автомобиля.",
+        "pt": "Novo botão nas configurações para testar o login antes de salvar.\nAs contas que precisam de um código de login por e-mail voltam a funcionar. O código é pedido e confirmado nas configurações.\nO login é mantido após reinícios.\nUm espaço antes ou depois do e-mail já não impede o login (#82).\nA configuração do país é exibida no idioma do admin.\nOs widgets de mapa agora encontram a posição do veículo.",
+        "nl": "Nieuwe knop in de instellingen om de aanmelding vóór het opslaan te testen.\nAccounts waarvoor bij het inloggen een code per e-mail nodig is, werken weer. De code wordt in de instellingen aangevraagd en bevestigd.\nDe aanmelding blijft behouden na een herstart.\nEen spatie voor of na het e-mailadres verhindert het inloggen niet meer (#82).\nDe landinstelling wordt weergegeven in de taal van de admin.\nKaartwidgets vinden nu de positie van het voertuig.",
+        "fr": "Nouveau bouton dans les paramètres pour tester la connexion avant d'enregistrer.\nLes comptes qui demandent un code de connexion par e-mail fonctionnent à nouveau. Le code est demandé et confirmé dans les paramètres.\nLa connexion est conservée lors des redémarrages.\nUn espace avant ou après l'e-mail n'empêche plus la connexion (#82).\nLe réglage du pays s'affiche dans la langue de l'admin.\nLes widgets de carte trouvent désormais la position du véhicule.",
+        "it": "Nuovo pulsante nelle impostazioni per verificare l'accesso prima di salvare.\nGli account che richiedono un codice di accesso via e-mail funzionano di nuovo. Il codice viene richiesto e confermato nelle impostazioni.\nL'accesso viene mantenuto dopo i riavvii.\nUno spazio prima o dopo l'e-mail non impedisce più l'accesso (#82).\nL'impostazione del paese viene mostrata nella lingua dell'admin.\nI widget delle mappe ora trovano la posizione del veicolo.",
+        "es": "Nuevo botón en la configuración para probar el inicio de sesión antes de guardar.\nLas cuentas que necesitan un código de inicio de sesión por correo electrónico vuelven a funcionar. El código se solicita y se confirma en la configuración.\nEl inicio de sesión se mantiene tras los reinicios.\nUn espacio antes o después del correo ya no impide el inicio de sesión (#82).\nLa configuración del país se muestra en el idioma del administrador.\nLos widgets de mapa ahora encuentran la posición del vehículo.",
+        "pl": "Nowy przycisk w ustawieniach do sprawdzenia logowania przed zapisaniem.\nKonta, które przy logowaniu wymagają kodu wysłanego e-mailem, znowu działają. Kod zamawia się i potwierdza w ustawieniach.\nLogowanie zostaje zachowane po ponownym uruchomieniu.\nSpacja przed lub po adresie e-mail nie blokuje już logowania (#82).\nUstawienie kraju jest wyświetlane w języku panelu admin.\nWidżety map znajdują teraz położenie pojazdu.",
+        "uk": "Нова кнопка в налаштуваннях для перевірки входу перед збереженням.\nОблікові записи, яким під час входу потрібен код електронною поштою, знову працюють. Код запитується і підтверджується в налаштуваннях.\nВхід зберігається після перезапуску.\nПробіл до або після адреси електронної пошти більше не заважає входу (#82).\nНалаштування країни відображається мовою адмінки.\nВіджети карт тепер знаходять положення автомобіля.",
+        "zh-cn": "设置中新增按钮，可在保存前测试登录。\n需要通过电子邮件接收登录验证码的账户可再次使用。验证码在设置中请求并确认。\n登录状态在重启后保持。\n电子邮件地址前后的空格不再导致登录失败 (#82)。\n国家设置以管理界面的语言显示。\n地图控件现在可以找到车辆位置。"
+      },
       "1.0.0": {
         "en": "**Breaking change:** the states of the remote control are renamed and every command is a button; the old ones are removed on the first start. Adjust scripts and visualizations\n**Breaking change:** only one cockpit version is polled per vehicle, and the second cockpit channel is removed\n**Breaking change:** battery, range, mileage, fuel and temperature get units and matching roles, and the shortest update interval is 5 minutes\nCommands and polled data follow the model of each vehicle; new are charge limits, charge mode, horn, lights, tyre pressure and alerts\nFar fewer requests against the hourly quota of Renault, a pause instead of errors once it is used up, and an expired token is renewed instead of losing the poll\nThe country comes from the settings instead of always Germany, and the log no longer contains personal data",
         "de": "**Breaking Change:** Die Datenpunkte der Fernsteuerung sind umbenannt und jeder Befehl ist ein Knopf; die alten werden beim ersten Start entfernt. Skripte und Visualisierungen anpassen\n**Breaking Change:** Je Fahrzeug wird nur noch eine Cockpit-Version abgefragt, der zweite Cockpit-Kanal entfällt\n**Breaking Change:** Batterie, Reichweite, Kilometerstand, Kraftstoff und Temperatur bekommen Einheiten und passende Rollen, und das kürzeste Abfrageintervall beträgt 5 Minuten\nBefehle und abgefragte Daten richten sich nach dem Modell des Fahrzeugs; neu sind Ladegrenzen, Lademodus, Hupe, Licht, Reifendruck und Warnmeldungen\nDeutlich weniger Anfragen gegen das Stundenkontingent von Renault, eine Pause statt Fehlern sobald es aufgebraucht ist, und ein abgelaufenes Token wird erneuert statt die Abfrage zu verlieren\nDas Land kommt aus den Einstellungen statt immer Deutschland, und das Log enthält keine persönlichen Daten mehr",
@@ -80,19 +93,6 @@
         "pl": "Naprawa logowania",
         "uk": "Виправлено вхід",
         "zh-cn": "修复登录"
-      },
-      "0.0.17": {
-        "en": "update apikey",
-        "de": "API-Key aktualisiert",
-        "ru": "Обновлён API-ключ",
-        "pt": "Atualizada a API key",
-        "nl": "API-sleutel bijgewerkt",
-        "fr": "Mise à jour de la clé API",
-        "it": "Chiave API aggiornata",
-        "es": "Clave API actualizada",
-        "pl": "Zaktualizowano klucz API",
-        "uk": "Оновлено API-ключ",
-        "zh-cn": "更新 API 密钥"
       }
     },
     "titleLang": {

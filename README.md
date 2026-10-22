@@ -192,7 +192,9 @@ above; the adapter does not create it, and removes it if an older version had cr
   Placeholder for the next version (at the beginning of the line):
   ### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+
+### 1.1.0 (2026-10-22)
+
 - New button in the settings to test the login before saving.
 - Accounts that need a login code by email work again. The code is requested and confirmed in the settings.
 - The login is kept across restarts.
@@ -246,10 +248,6 @@ above; the adapter does not create it, and removes it if an older version had cr
 ### 0.0.23
 
 - (TA2k) align API headers with My Renault Android app, drop EOL Node 18/20, migrate admin UI to jsonConfig
-
-### 0.0.22
-
-- (TA2k) update dependencies, migrate to ESLint 10, fix repochecker findings
 
 [Older changelogs can be found here](CHANGELOG_OLD.md)
 
