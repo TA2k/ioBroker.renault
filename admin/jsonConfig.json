@@ -54,7 +54,6 @@
       "type": "select",
       "label": "Country",
       "help": "Country of the account in the app",
-      "noTranslation": true,
       "default": "de",
       "options": [
         {

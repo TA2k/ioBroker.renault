@@ -1157,6 +1157,22 @@ describe('Kamereon API key', () => {
   });
 });
 
+describe('settings texts', () => {
+  /** @type {[string, Record<string, unknown>][]} */
+  const items = Object.entries(require('./admin/jsonConfig.json').items);
+  for (const [name, item] of items) {
+    for (const field of ['label', 'help', 'text'].filter((field) => typeof item[field] === 'string')) {
+      it(`translates the ${field} of ${name}`, () => {
+        // noTranslation on an element also skips the translation of its label and help
+        expect(item.noTranslation).to.not.equal(true);
+        for (const file of require('node:fs').readdirSync(__dirname + '/admin/i18n')) {
+          expect(require('./admin/i18n/' + file), file).to.have.property(String(item[field]));
+        }
+      });
+    }
+  }
+});
+
 describe('country and locale', () => {
   for (const { value } of require('./admin/jsonConfig.json').items.country.options) {
     it(`finds a locale of the My Renault app for the country ${value} of the settings`, async () => {

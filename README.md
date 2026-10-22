@@ -195,6 +195,7 @@ above; the adapter does not create it, and removes it if an older version had cr
 - A space before or after the email in the settings no longer makes the login fail with `403042 Invalid LoginID` (#82).
 - Accounts for which Renault asks for a code by email at login (two-factor authentication) work again. **Test login** has the code sent, and **Confirm code** in the settings finishes the login. A login in the background that needs a code stops instead of retrying and raises an admin notification.
 - The login session is kept across restarts, so the adapter logs in with the password only when Renault ends the session.
+- The label and help text of the country in the settings are shown in the language of the admin instead of in English.
 - GPS latitude and longitude now carry the roles `value.gps.latitude` and `value.gps.longitude`, so map widgets and the type detector find the vehicle position. Existing states are updated on the next start.
 
 ### 1.0.0 (2026-09-23)
