@@ -193,6 +193,10 @@ above; the adapter does not create it, and removes it if an older version had cr
   ### **WORK IN PROGRESS**
 -->
 
+### **WORK IN PROGRESS**
+
+- The buttons refreshBattery, refreshClimate and refreshLocation no longer fail now and then with "Timeout (-1) is smaller than 0".
+
 ### 1.1.0 (2026-10-22)
 
 - New button in the settings to test the login before saving.

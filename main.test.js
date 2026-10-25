@@ -3427,6 +3427,34 @@ describe('refresh buttons', () => {
     expect(pending(adapter, 'location').ms).to.equal(2 * MINUTE);
   });
 
+  it('reads at once when the clock moves on while the read is scheduled', async () => {
+    const adapter = await started();
+    const realNow = Date.now;
+    let now = realNow();
+    // every clock read lands a millisecond later
+    Date.now = () => now++;
+    try {
+      for (const path of ['refreshBattery', 'refreshClimate', 'refreshLocation']) {
+        await press(adapter, path);
+      }
+    } finally {
+      Date.now = realNow;
+    }
+    expect(pending(adapter, 'battery-status').ms).to.equal(0);
+    expect(pending(adapter, 'hvac-status').ms).to.equal(0);
+    expect(pending(adapter, 'location').ms).to.equal(0);
+    expect(adapter.log.error.called).to.equal(false);
+  });
+
+  it('reads at once when the three minutes since the last read end right now', async () => {
+    const adapter = await started();
+    await press(adapter, 'refreshLocation');
+    await pending(adapter, 'location').fn();
+    clock?.tick(3 * MINUTE);
+    await press(adapter, 'refreshLocation');
+    expect(pending(adapter, 'location').ms).to.equal(0);
+  });
+
   it('keeps the battery and the location read apart', async () => {
     const adapter = await started();
     await press(adapter, 'refreshBattery');

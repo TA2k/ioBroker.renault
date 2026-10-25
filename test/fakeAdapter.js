@@ -136,7 +136,11 @@ class FakeAdapter extends EventEmitter {
     return Promise.resolve();
   }
 
+  /** Rejects a negative delay like the js-controller validator does. */
   setTimeout(fn, ms) {
+    if (!(ms >= 0)) {
+      throw new Error('Timeout (' + ms + ') is smaller than 0');
+    }
     const timer = { fn, ms };
     this.timeouts.push(timer);
     return timer;

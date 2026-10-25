@@ -696,7 +696,9 @@ class Renault extends utils.Adapter {
     }
     const key = vin + ' ' + path;
     this.refreshTimeouts[key] && this.clearTimeout(this.refreshTimeouts[key]);
-    const due = Math.max(Date.now() + delayMs, (this.lastRefresh[key] ?? -Infinity) + REFRESH_GAP_MS);
+    // one clock read: a second one a millisecond later turns a delay of 0 into -1, which setTimeout rejects
+    const now = Date.now();
+    const due = Math.max(now + delayMs, (this.lastRefresh[key] ?? -Infinity) + REFRESH_GAP_MS);
     this.refreshTimeouts[key] = this.setTimeout(async () => {
       delete this.refreshTimeouts[key];
       // the running poll may have read the endpoint before the car uploaded, so read again after it
@@ -712,7 +714,7 @@ class Renault extends utils.Adapter {
       } finally {
         this.refreshes.delete(refresh);
       }
-    }, due - Date.now());
+    }, due - now);
   }
 
   /** Run one poll cycle unless one is already running; a running single-endpoint read is awaited first. */
