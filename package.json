@@ -41,7 +41,7 @@
     "@iobroker/eslint-config": "^2.3.4",
     "@iobroker/testing": "^6.3.1",
     "@types/node": "^22.20.5",
-    "globals": "^17.13.0",
+    "globals": "^17.14.0",
     "typescript": "~6.0.3"
   },
   "main": "main.js",
